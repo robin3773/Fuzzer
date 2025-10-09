@@ -1,0 +1,74 @@
+# ===== Verilator / build artifacts =====
+/verilator/
+/obj_dir/
+/Vtop
+Vtop.exe
+*.o
+*.d
+
+# ===== Verilator-generated C++/headers =====
+**/V*.h
+**/V*.cpp
+**/V*.mk
+
+# ===== Runtime working directories & AFL outputs =====
+/workdir/
+/workdir_latest/
+/corpora/
+/corpora/*
+/corpora/**/*
+/traces/*.vcd
+/traces/*.log
+
+# If you keep AFL outputs at top-level corpora/queue etc:
+corpora/
+corpora/**
+
+# ===== Simulation artifacts =====
+*.vcd
+*.vpd
+*.fst
+*.log
+
+# ===== Temporary / tooling =====
+/tmp/
+/*.tmp
+
+# ===== Python venv / caches =====
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+pip-log.txt
+
+# ===== Editor / OS files =====
+*~
+*.swp
+*.swo
+.DS_Store
+.idea/
+.vscode/
+*.iml
+
+# ===== Large binaries / images / firmware =====
+*.bin
+*.elf
+*.hex
+*.img
+
+# ===== Git LFS placeholder (if you use it) =====
+.gitattributes
+
+# ===== Secrets / credential files (do NOT commit) =====
+.env
+.env_workdir
+*.pem
+*.key
+*.crt
+
+# ===== Misc =====
+coverage/
+*.cover
+*.prof
+
+# Keep this file tracked; ignore everything above.

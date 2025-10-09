@@ -1,169 +1,139 @@
-#!/bin/bash
-# ============================================================
+#!/usr/bin/env bash
 # setup_hwfuzz.sh
-# Project: Verilator-based Hardware Fuzzer Framework
-# Author: Mahmadul Hassan Robin
-# Description:
-#   Creates a clean directory structure for CPU fuzzing using
-#   Verilator + AFL++. It includes folders for RTL, harness,
-#   seeds, corpora, tools, docs, and traces.
-# ===========================================================
+# Create the HW-Fuzz project folders and empty placeholder files. 
+# Usage: chmod +x setup_hwfuzz.sh && ./setup_hwfuzz.sh
+set -euo pipefail
 
-set -e
+ROOT=${1:-.}
+WORKDIR="$ROOT/workdir"
 
-# Root directory name
-ROOT_DIR="hw-fuzz"
+info(){ printf "\033[1;34m[INFO]\033[0m %s\n" "$*"; }
+warn(){ printf "\033[1;33m[WARN]\033[0m %s\n" "$*"; }
+die(){ printf "\033[1;31m[ERROR]\033[0m %s\n" "$*"; exit 1; }
 
-echo "🚀 Creating hardware fuzzing project structure under: $ROOT_DIR"
+info "Creating directories under: $ROOT"
 
-# --- Base directories ---
-mkdir -p $ROOT_DIR/{rtl/{cpu,tb},harness,tools,afl,docs,seeds,corpora/{queue,crashes,hangs},traces,experiments,ci,verilator}
+dirs=(
+  "$ROOT/rtl"
+  "$ROOT/rtl/cpu"
+  "$ROOT/rtl/tb"
+  "$ROOT/harness"
+  "$ROOT/tools"
+  "$ROOT/seeds"
+  "$ROOT/afl"
+  "$ROOT/corpora"
+  "$ROOT/corpora/queue"
+  "$ROOT/corpora/crashes"
+  "$ROOT/corpora/hangs"
+  "$ROOT/traces"
+  "$WORKDIR"
+  "$WORKDIR/logs"
+  "$WORKDIR/logs/build"
+  "$WORKDIR/logs/sim"
+  "$WORKDIR/logs/afl"
+  "$WORKDIR/traces"
+  "$WORKDIR/corpora"
+  "$ROOT/docs"
+  "$ROOT/experiments"
+  "$ROOT/ci"
+  "$ROOT/verilator"
+)
 
-# --- Create placeholder files ---
-touch $ROOT_DIR/README.md
-touch $ROOT_DIR/.gitignore
-touch $ROOT_DIR/LICENSE
+for d in "${dirs[@]}"; do
+  if [ ! -d "$d" ]; then
+    mkdir -p "$d"
+    info "mkdir $d"
+  else
+    info "exists $d"
+  fi
+done
 
-# --- RTL folder ---
-cat <<EOF > $ROOT_DIR/rtl/README.md
-# RTL Directory
+info "Creating empty placeholder files (will NOT overwrite existing files)"
 
-Place your RTL source files here.
-- \`cpu/\`: contains the core design (e.g., picorv32.v, vexriscv.v)
-- \`tb/\`: contains any simple testbench modules (like memory model)
-- \`top.sv\`: top-level wrapper used for simulation and fuzzing.
+# helper to create file only if it doesn't exist
+ensure_file() {
+  local f="$1"
+  if [ -e "$f" ]; then
+    info "exists $f"
+  else
+    # ensure parent dir exists
+    mkdir -p "$(dirname "$f")"
+    touch "$f"
+    info "created $f"
+  fi
+}
 
-Recommended top module signals:
-- clk, rst_n
-- imem[] array or AXI interface
-- pc (program counter)
-- trap or exception flag
+# top-level placeholders
+ensure_file "$ROOT/.gitignore"
+ensure_file "$ROOT/README.md"
+ensure_file "$ROOT/LICENSE"
+
+# rtl/harness placeholders
+ensure_file "$ROOT/rtl/top.sv"
+ensure_file "$ROOT/rtl/cpu/picorv32.v"    # user said they have this already; we won't overwrite
+ensure_file "$ROOT/rtl/tb/sim_mem.sv"
+
+# harness
+ensure_file "$ROOT/harness/fuzz_picorv32.cpp"
+ensure_file "$ROOT/harness/imem_loader.cpp"
+ensure_file "$ROOT/harness/Makefile"
+
+# tools
+ensure_file "$ROOT/tools/build.sh"
+ensure_file "$ROOT/tools/build_and_log.sh"
+ensure_file "$ROOT/tools/run_once.sh"
+ensure_file "$ROOT/tools/run_once_log.sh"
+ensure_file "$ROOT/tools/run_fuzz.sh"
+ensure_file "$ROOT/tools/run_fuzz_log.sh"
+
+# seeds and afl
+ensure_file "$ROOT/seeds/seed_empty.bin"
+ensure_file "$ROOT/afl/afl.conf"
+
+# workdir env
+ensure_file "$WORKDIR/.env_workdir"
+
+# docs & experiments
+ensure_file "$ROOT/docs/design.md"
+ensure_file "$ROOT/docs/fuzzing_recipe.md"
+ensure_file "$ROOT/experiments/exp_config.yaml"
+
+# ci and verilator placeholders
+ensure_file "$ROOT/ci/smoke_test.sh"
+ensure_file "$ROOT/verilator/.gitkeep"
+
+# mark script placeholders executable where appropriate
+make_exec() {
+  local f="$1"
+  if [ -f "$f" ]; then
+    chmod +x "$f" || true
+    info "chmod +x $f"
+  fi
+}
+
+make_exec "$ROOT/tools/build.sh"
+make_exec "$ROOT/tools/build_and_log.sh"
+make_exec "$ROOT/tools/run_once.sh"
+make_exec "$ROOT/tools/run_once_log.sh"
+make_exec "$ROOT/tools/run_fuzz.sh"
+make_exec "$ROOT/tools/run_fuzz_log.sh"
+make_exec "$ROOT/ci/smoke_test.sh"
+
+# create symlink to latest workdir
+ln -sfn "$WORKDIR" "$ROOT/workdir_latest"
+info "symlink workdir_latest -> $WORKDIR"
+
+info "Done. Empty files created where needed. Edit files to add content."
+
+cat <<EOF
+
+Next recommended steps:
+  - Add your picorv32.v to rtl/cpu/ (if not already).
+  - Edit rtl/top.sv and harness/fuzz_picorv32.cpp to match your core's ports.
+  - Populate tools/* scripts with your preferred commands.
+  - Commit the initial skeleton:
+      git add .
+      git commit -m "project skeleton created"
+      git push -u origin main
+
 EOF
-
-# --- Harness folder ---
-cat <<EOF > $ROOT_DIR/harness/README.md
-# Harness Directory
-
-Contains Verilator C++ fuzzing harness and Makefile.
-
-- \`fuzz_picorv32.cpp\`: main harness entry (loads @@ input, runs CPU)
-- \`harness_common.h\`: shared utils and macros
-- \`Makefile\`: builds Verilator binary (\`Vtop\`)
-EOF
-
-# --- Tools folder ---
-cat <<'EOF' > $ROOT_DIR/tools/build.sh
-#!/bin/bash
-# build.sh - build verilator simulation
-set -e
-TOP=${1:-top}
-echo "🔧 Building Verilator model for $TOP..."
-verilator --cc rtl/$TOP.sv --exe harness/fuzz_picorv32.cpp --top-module $TOP -O2 -Wno-fatal
-make -C obj_dir -f V${TOP}.mk V${TOP}
-echo "✅ Build complete: obj_dir/V${TOP}"
-EOF
-chmod +x $ROOT_DIR/tools/build.sh
-
-cat <<'EOF' > $ROOT_DIR/tools/run_fuzz.sh
-#!/bin/bash
-# run_fuzz.sh - Run AFL++ fuzzing
-set -e
-SIM_BIN=${1:-./obj_dir/Vtop}
-SEEDS_DIR=${2:-seeds}
-OUT_DIR=${3:-corpora}
-echo "🚦 Starting AFL fuzzing..."
-afl-fuzz -i $SEEDS_DIR -o $OUT_DIR -t 1000 -m 2000 -- $SIM_BIN @@
-EOF
-chmod +x $ROOT_DIR/tools/run_fuzz.sh
-
-cat <<'EOF' > $ROOT_DIR/tools/run_once.sh
-#!/bin/bash
-# run_once.sh - Run simulator on a single input and save trace
-set -e
-SIM_BIN=${1:-./obj_dir/Vtop}
-INPUT_FILE=${2:-seeds/seed_empty.bin}
-OUT_NAME=$(basename $INPUT_FILE)
-OUT_DIR=traces
-mkdir -p $OUT_DIR
-echo "▶️ Running single test input: $INPUT_FILE"
-$SIM_BIN $INPUT_FILE > $OUT_DIR/${OUT_NAME%.bin}.log 2>&1 || true
-echo "💾 Log saved to $OUT_DIR/${OUT_NAME%.bin}.log"
-EOF
-chmod +x $ROOT_DIR/tools/run_once.sh
-
-# --- AFL folder ---
-cat <<EOF > $ROOT_DIR/afl/README.md
-# AFL Directory
-
-Contains AFL++ configuration and optional mutator sources.
-- \`afl.conf\`: custom AFL parameters.
-- \`afl_mutator/\`: for grammar or instruction-aware mutation.
-EOF
-
-# --- Seeds folder ---
-cat <<EOF > $ROOT_DIR/seeds/README.md
-# Seeds Directory
-
-Initial corpus for AFL++.
-Add small valid programs, e.g.:
-- seed_empty.bin (NOPs or zeros)
-- seed_nop_loop.bin
-EOF
-echo -n -e "\x13\x00\x00\x00" > $ROOT_DIR/seeds/seed_empty.bin
-
-# --- Docs folder ---
-cat <<EOF > $ROOT_DIR/docs/README.md
-# Documentation
-
-- \`design.md\`: signal map, interface description.
-- \`fuzzing_recipe.md\`: mapping bytes to instructions, coverage feedback.
-- \`troubleshooting.md\`: tips for debugging simulation and fuzz runs.
-EOF
-
-# --- .gitignore ---
-cat <<EOF > $ROOT_DIR/.gitignore
-# Ignore Verilator build artifacts
-/verilator/
-/obj_dir/
-/corpora/
-/traces/*.vcd
-*.o
-*.exe
-*.log
-*.vcd
-EOF
-
-# --- Root README ---
-cat <<EOF > $ROOT_DIR/README.md
-# 🧠 Hardware Fuzzing Framework (Verilator + AFL++)
-
-This project provides a modular template for building and fuzzing hardware CPU cores (like PicoRV32 or VexRiscv).
-
-## Directory Overview
-\`\`\`
-rtl/        → CPU RTL and testbench
-harness/    → C++ fuzzing harness & Makefile
-tools/      → build / run / triage scripts
-afl/        → AFL++ config and mutators
-seeds/      → initial test corpus
-corpora/    → fuzzer outputs (queue, crashes)
-traces/     → waveforms and logs
-docs/       → design notes
-\`\`\`
-
-## Quickstart
-\`\`\`bash
-chmod +x tools/build.sh
-./tools/build.sh top      # build verilator binary
-./tools/run_fuzz.sh       # start fuzzing
-\`\`\`
-
-## Next Steps
-- Place your CPU RTL under \`rtl/cpu/\`
-- Add \`rtl/top.sv\` wrapper exposing clk, rst_n, pc, trap, imem[]
-- Write harness/fuzz_picorv32.cpp
-EOF
-
-# --- Summary ---
-echo "✅ Hardware fuzzing folder structure created successfully!"
-tree $ROOT_DIR || ls -R $ROOT_DIR
