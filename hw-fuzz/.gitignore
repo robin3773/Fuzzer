@@ -1,0 +1,9 @@
+# Ignore Verilator build artifacts
+/verilator/
+/obj_dir/
+/corpora/
+/traces/*.vcd
+*.o
+*.exe
+*.log
+*.vcd
