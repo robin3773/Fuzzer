@@ -3,24 +3,6 @@
 A practical template and quick-start guide for fuzzing CPU cores (e.g. PicoRV32, VexRiscv) using Verilator and AFL++.
 This repo organizes RTL, harnesses, seeds and a single central `workdir/` where runtime logs and artifacts are collected.
 
----
-
-## What this repo contains (high level)
-
-* `rtl/` — CPU RTL and sim wrappers (`rtl/cpu/`, `rtl/tb/`, `rtl/top.sv`)
-* `harness/` — Verilator C++ harnesses and helper code (loads IMEM, drives clock)
-* `tools/` — small helper scripts to build/run/fuzz and log wrappers that write into `workdir/`
-* `seeds/` — initial AFL seed corpus (small valid programs)
-* `afl/` — AFL configs and optional custom mutators
-* `corpora/` — AFL output (queue, crashes, hangs) — **do not commit**
-* `traces/` — VCD waveforms and human-readable traces produced during triage
-* `workdir/` (or `workdir_latest/`) — centralized runtime working dir for logs, traces, corpora, snapshots
-* `docs/` — design notes and fuzzing recipes
-* `experiments/` — experiment configs and results
-* `verilator/`, `obj_dir/` — Verilator build artifacts (gitignored)
-* `ci/` — CI scripts or Dockerfiles for reproducible builds
-
-(See the `Directory layout` section below for more detail.)
 
 ---
 
@@ -34,7 +16,7 @@ This repo organizes RTL, harnesses, seeds and a single central `workdir/` where 
 | `seeds/`       | Initial corpus for AFL                                               |
 | `afl/`         | AFL tuning files and mutator source(s)                               |
 | `corpora/`     | AFL outputs (queue, crashes, hangs) — runtime only                   |
-| `traces/`      | Waveforms / triage outputs (VCD, logs)                               |
+| `traces/`      | Waveforms/triage outputs (VCD, logs)                               |
 | `workdir/`     | Central working directory with `logs/`, `traces/`, `corpora/`        |
 | `docs/`        | Design docs and recipes                                              |
 | `experiments/` | Experiment configs/results                                           |
