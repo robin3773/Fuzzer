@@ -78,10 +78,13 @@ $(OBJ_DIR)/V$(MODULE): .stamp.verilate
 	@echo ""
 	@mkdir -p $(OBJ_DIR)
 	verilator  -Wall --trace --x-assign unique --x-initial unique \
-	           --Wno-fatal --Wno-DECLFILENAME --Wno-UNUSEDSIGNAL --Wno-BLKSEQ --Wno-GENUNNAMED \
-	           --cc ./rtl/cpu/$(MODULE)/$(MODULE).v \
-	           --exe ../harness/tb_$(MODULE).cpp \
-	           -top-module $(MODULE) --Mdir $(OBJ_DIR)
+			--Wno-fatal --Wno-DECLFILENAME --Wno-UNUSEDSIGNAL --Wno-BLKSEQ --Wno-GENUNNAMED \
+			--cc ./rtl/cpu/$(MODULE)/$(MODULE).v \
+			--exe ../harness/tb_$(MODULE).cpp \
+			-top-module $(MODULE) --Mdir ./verilator/obj_dir \
+			-DRISCV_FORMAL
+
+	@# Ensure the verilate timestamp exists for Make deps
 	@touch .stamp.verilate
 
 # -----------------------
@@ -144,5 +147,5 @@ clean:
 	@echo "  ║                      CLEANING UP...                          ║"
 	@echo "  ╚══════════════════════════════════════════════════════════════╝"
 	@echo ""
-	@rm -rf $(OBJ_DIR) .stamp.verilate
-	@rm -f  $(WAVE_FILE) ./waveform.vcd
+	@rm -rvf $(OBJ_DIR) .stamp.verilate
+	@rm -vf  $(WAVE_FILE) ./waveform.vcd

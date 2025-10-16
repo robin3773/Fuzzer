@@ -1,0 +1,12 @@
+
+build/firmware.elf:     file format elf32-littleriscv
+
+
+Disassembly of section .text:
+
+00000000 <_start>:
+   0:	00a00293          	li	t0,10
+   4:	00d00313          	li	t1,13
+   8:	006283b3          	add	t2,t0,t1
+   c:	4013de13          	srai	t3,t2,0x1
+  10:	00100073          	ebreak

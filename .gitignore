@@ -70,6 +70,6 @@ pip-log.txt
 coverage/
 *.cover
 *.prof
-*.stamp*
+*.stamp
 
 # Keep this file tracked; ignore everything above.
