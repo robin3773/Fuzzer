@@ -1,7 +1,9 @@
-# ===== Minimal Makefile + Debug + Color + Dependency Tracking =====
+# ==========================================================
+# RV32 Custom Mutator - AFL++ Compatible Makefile
+# ==========================================================
 
-CXX       = g++
-MODE     ?= release
+# Use AFL compiler for instrumentation compatibility
+CXX       ?= afl-clang-fast++
 NO_COLOR ?= 0
 
 # Colors (disable with NO_COLOR=1)
@@ -17,17 +19,15 @@ else
   C_YEL   := \033[1;33m
 endif
 
-# Compiler flags based on mode
-ifeq ($(MODE),debug)
-  CXXFLAGS = -std=c++17 -O0 -g3 -Wall -Wextra -fPIC -MMD -MP -Iinclude
-else
-  CXXFLAGS = -std=c++17 -O2 -Wall -Wextra -fPIC -MMD -MP -Iinclude
-endif
+# Compiler flags
+CXXFLAGS := -std=c++17 -fPIC -Wall -Wextra -Wno-unused-parameter -Iinclude -O2
 
-LDFLAGS   = -shared
+
+LDFLAGS  := -shared
 
 SRC_DIR   = src
-OBJ_DIR   = build/$(MODE)
+OBJ_DIR   = build/
+TARGET    = librv32_mutator.so
 
 SOURCES = \
   $(SRC_DIR)/Random.cpp \
@@ -39,27 +39,21 @@ SOURCES = \
   $(SRC_DIR)/LegalCheck.cpp
 
 OBJECTS = $(SOURCES:$(SRC_DIR)/%.cpp=$(OBJ_DIR)/%.o)
-DEPS    = $(OBJECTS:.o=.d)
-
-TARGET = librv32_mutator.so
 
 all: $(TARGET)
 
 $(TARGET): $(OBJECTS)
-	@mkdir -p $(OBJ_DIR)
-	@echo "$(C_GRN)[LD]$(C_RESET) $@"
-	@$(CXX) -o $@ $^ $(LDFLAGS)
+	@echo "$(C_GRN)[LD] Building $@$(C_RESET)"
+	$(CXX) -o $@ $^ $(LDFLAGS)
 
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.cpp
 	@mkdir -p $(OBJ_DIR)
-	@echo "$(C_BLU)[CXX]$(C_RESET) $<"
-	@$(CXX) $(CXXFLAGS) -c $< -o $@
-
--include $(DEPS)
+	@echo "$(C_BLU)[CXX] Compiling $<$(C_RESET)"
+	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 clean:
-	@echo "$(C_YEL)[CLEAN]$(C_RESET) build $(TARGET)"
-	@rm -rf build $(TARGET)
+	@echo "$(C_YEL)[CLEAN] Removing build files$(C_RESET)"
+	rm -rf build $(TARGET)
 
 .PHONY: all clean
-# ======================================================================
+# ==========================================================
