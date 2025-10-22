@@ -1,4 +1,3 @@
-
 #pragma once
 #include <cstdint>
 #include <ctime>
@@ -7,8 +6,11 @@ namespace mut {
 
 class Random {
   static uint32_t state_;
+
 public:
-  static inline void seed(uint32_t s) { state_ = s ? s : (uint32_t)time(nullptr); }
+  static inline void seed(uint32_t s) {
+    state_ = s ? s : (uint32_t)time(nullptr);
+  }
   static inline uint32_t rnd32() {
     uint32_t x = state_;
     x ^= x << 13;

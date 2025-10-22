@@ -1,0 +1,27 @@
+# .clang-format — Custom RV project style (Style E)
+BasedOnStyle: LLVM
+IndentWidth: 2
+TabWidth: 2
+UseTab: Never
+ColumnLimit: 100
+AllowShortIfStatementsOnASingleLine: false
+AllowShortFunctionsOnASingleLine: Inline
+BreakBeforeBraces: Allman
+NamespaceIndentation: None
+PointerAlignment: Left
+AlignConsecutiveAssignments: true
+AlignConsecutiveDeclarations: true
+AlignTrailingComments: true
+SpaceBeforeParens: ControlStatements
+SpacesInParentheses: false
+SpacesInAngles: false
+SpacesInSquareBrackets: false
+SpacesBeforeTrailingComments: 2
+ReflowComments: true
+SortIncludes: true
+IncludeBlocks: Regroup
+Cpp11BracedListStyle: true
+DerivePointerAlignment: false
+AccessModifierOffset: -2
+ContinuationIndentWidth: 2
+KeepEmptyLinesAtTheStartOfBlocks: false

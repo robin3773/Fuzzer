@@ -1,14 +1,18 @@
 // ==========================================================
-// mutator_selftest.cpp — RV32 Mutator Standalone Tester
-// (with --repeat N and clear disassembly boundaries)
+// mutator_selftest.cpp — RV32/RV64 Mutator Standalone Tester
+// (with --repeat N, clear disassembly boundaries, and AFL API fallbacks)
 // ==========================================================
-// - Dynamically loads your AFL++ custom mutator (librv32_mutator.so)
-// - Calls afl_custom_init(), afl_custom_fuzz()
+// Features:
+// - Dynamically loads your AFL++ custom mutator shared object
+// - Supports BOTH afl_custom_fuzz (new API) and afl_custom_fuzz_b (old API)
+// - Calls afl_custom_init(), afl_custom_deinit()
 // - Disassembles BEFORE and AFTER buffers with system objdump:
 //     riscv64-unknown-elf-objdump -b binary -m riscv:rv32 -M rvc,numeric -D -w
-// - Prints side-by-side lines:  PC: HEX  ASM   →   PC: HEX  ASM
+// - Prints side-by-side lines: "PC: HEX  ASM   →   PC: HEX  ASM"
 // - Colors the right side green if the disassembly line changed
-// - NEW: --repeat N  ⇒ applies N sequential mutations with clear banners
+// - NEW: --repeat N  ⇒ applies N sequential mutations with banners
+// - NEW: --width W   ⇒ set side-by-side padding width (default 64)
+// - Safer output-length inference and better diagnostics
 //
 // Build:
 //   g++ -std=c++17 mutator_selftest.cpp -ldl -o mutator_selftest
@@ -26,13 +30,14 @@
 // Env knobs:
 //   OBJDUMP=/path/to/riscv64-unknown-elf-objdump   (default: riscv64-unknown-elf-objdump)
 //   NO_COLOR=1                                     (disable ANSI colors)
-//   XLEN=32                                        (future; currently forces rv32)
+//   XLEN=32|64                                     (select disasm mode)
 // ==========================================================
 
 #include <dlfcn.h>
 #include <cstdio>
 #include <cstdlib>
 #include <cstdint>
+#include <cctype>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -47,10 +52,12 @@
 #include <sys/types.h>
 
 // ---------- AFL custom mutator signatures ----------
-using afl_fuzz_fn = unsigned char *(*)(unsigned char *buf, size_t buf_size,
-                                       unsigned char *out_buf, size_t max_size,
-                                       unsigned int seed);
-using afl_init_fn = int (*)(void *);
+using afl_fuzz_fn   = unsigned char *(*)(unsigned char *buf, size_t buf_size,
+                                         unsigned char *out_buf, size_t max_size,
+                                         unsigned int seed);
+using afl_fuzz_b_fn = size_t (*)(unsigned char *data, size_t size,
+                                 unsigned char **out_buf, unsigned int seed);
+using afl_init_fn   = int (*)(void *);
 using afl_deinit_fn = void (*)();
 
 // ---------- ANSI colors ----------
@@ -71,6 +78,16 @@ static std::string env_or(const char* key, const char* defv) {
   const char* v = std::getenv(key);
   return (v && *v) ? std::string(v) : std::string(defv);
 }
+
+// Read the selected mutator strategy (default HYBRID) and normalize it
+static std::string get_strategy() {
+  std::string s = env_or("RV32_STRATEGY", "HYBRID");
+  std::string u = s;
+  std::transform(u.begin(), u.end(), u.begin(),
+                 [](unsigned char c){ return std::toupper(c); });
+  return u;
+}
+
 
 static bool read_file(const std::string& path, std::vector<unsigned char>& out) {
   FILE* f = std::fopen(path.c_str(), "rb");
@@ -93,7 +110,7 @@ static bool write_file_temp(const std::string& path, const std::vector<unsigned 
   return w == buf.size();
 }
 
-// Run objdump and collect lines like: "00000000: 00000513  addi a0,zero,0"
+// Run objdump and collect lines like: "00000000: 00000513    addi a0,zero,0"
 static std::vector<std::string> disasm_with_objdump(const std::string& objdump_path,
                                                     const std::vector<unsigned char>& bytes,
                                                     bool rv64 = false) {
@@ -105,7 +122,7 @@ static std::vector<std::string> disasm_with_objdump(const std::string& objdump_p
     return {};
   }
   std::string binpath = std::string(tmpTemplate) + ".bin";
-  ::close(fd); // we only wanted a unique prefix
+  ::close(fd); // just needed a unique prefix
   if (!write_file_temp(binpath, bytes)) {
     std::fprintf(stderr, "[!] Failed to write temp binary: %s\n", binpath.c_str());
     ::unlink(tmpTemplate);
@@ -125,7 +142,7 @@ static std::vector<std::string> disasm_with_objdump(const std::string& objdump_p
   std::vector<std::string> out_lines;
   FILE* pipe = popen(cmd.str().c_str(), "r");
   if (!pipe) {
-    std::fprintf(stderr, "[!] popen failed for objdump\n");
+    std::fprintf(stderr, "[!] popen failed for objdump (cmd: %s)\n", cmd.str().c_str());
     ::unlink(binpath.c_str());
     ::unlink(tmpTemplate);
     return {};
@@ -134,12 +151,11 @@ static std::vector<std::string> disasm_with_objdump(const std::string& objdump_p
   while (getline(&line, &cap, pipe) != -1) {
     std::string s(line);
     if (!s.empty() && (s.back() == '\n' || s.back() == '\r')) s.pop_back();
-    auto pos = s.find(':');
-    if (pos != std::string::npos) {
-      size_t i = s.find_first_not_of(' ');
-      if (i != std::string::npos && std::isxdigit((unsigned char)s[i])) {
-        out_lines.push_back(s);
-      }
+    // keep lines that start with hex address and a colon
+    size_t i = s.find_first_not_of(' ');
+    if (i != std::string::npos && i + 9 < s.size() && std::isxdigit((unsigned char)s[i])) {
+      size_t colon = s.find(':', i);
+      if (colon != std::string::npos) out_lines.push_back(s);
     }
   }
   if (line) free(line);
@@ -150,7 +166,7 @@ static std::vector<std::string> disasm_with_objdump(const std::string& objdump_p
 }
 
 // Format a side-by-side line with padding and change highlight
-static void print_side_by_side(const std::string& left, const std::string& right, size_t pad = 56) {
+static void print_side_by_side(const std::string& left, const std::string& right, size_t pad = 64) {
   std::string L = left;
   std::string R = right;
   bool changed = (L != R);
@@ -168,10 +184,14 @@ static void show_diff_disasm(const std::vector<unsigned char>& before,
                              const std::vector<unsigned char>& after,
                              const std::string& objdump_path,
                              bool rv64,
-                             int step_idx, int step_total) {
+                             int step_idx, int step_total,
+                             size_t pad,
+                             const std::string& strategy) {
   std::cout << C(C_CYAN)
             << "\n──────────────────────────────────────────────────────────────────────────────\n"
-            << " Step " << step_idx << "/" << step_total << " — Disassembly (system objdump) — BEFORE  vs  AFTER\n"
+            << " Step " << step_idx << "/" << step_total
+            << " — Strategy: " << strategy
+            << " — Disassembly (system objdump) — BEFORE  vs  AFTER\n"
             << "    Format:  PC: HEX   ASM\n"
             << "──────────────────────────────────────────────────────────────────────────────" << C(C_RESET) << "\n";
 
@@ -182,7 +202,7 @@ static void show_diff_disasm(const std::vector<unsigned char>& before,
   for (size_t i = 0; i < n; ++i) {
     std::string l = (i < L.size()) ? L[i] : "";
     std::string r = (i < R.size()) ? R[i] : "";
-    print_side_by_side(l, r);
+    print_side_by_side(l, r, pad);
   }
 
   // Tail boundary line
@@ -229,28 +249,23 @@ static bool find_seed_bin(std::string& out_path) {
   return false;
 }
 
-
 // ---------- CLI parsing ----------
 struct Args {
-  // OLD:
-  // std::string lib = "./afl/rv32_mutator/librv32_mutator.so";
-
-  // NEW (relative to test/ folder)
-  std::string lib = "../librv32_mutator.so";
+  std::string lib = "../librv32_mutator.so"; // relative to test/
   std::string in  = "";
   unsigned int seed = 12345;
   int repeat = 1;
   std::string objdump = env_or("OBJDUMP", "riscv64-unknown-elf-objdump");
-  bool rv64 = false; // future
+  bool rv64 = false; // future-ready
+  size_t pad = 64;   // side-by-side width
 };
-
 
 static void usage(const char* prog) {
   std::cout <<
-    "Usage: " << prog << " [--lib path.so] [--in input.bin] [--seed N] [--repeat N] [--objdump PATH]\n"
+    "Usage: " << prog << " [--lib path.so] [--in input.bin] [--seed N] [--repeat N] [--objdump PATH] [--width W]\n"
     "Env:   NO_COLOR=1 disables colors\n"
     "       OBJDUMP=/path/to/riscv64-unknown-elf-objdump (default)\n"
-    "       XLEN=32|64 (64 not yet used; future)\n";
+    "       XLEN=32|64 (affects disassembly only)\n";
 }
 
 static Args parse_args(int argc, char** argv) {
@@ -262,6 +277,7 @@ static Args parse_args(int argc, char** argv) {
     else if (s == "--seed" && i+1 < argc) a.seed = (unsigned)std::strtoul(argv[++i], nullptr, 0);
     else if (s == "--repeat" && i+1 < argc) a.repeat = std::max(1, (int)std::strtol(argv[++i], nullptr, 0));
     else if (s == "--objdump" && i+1 < argc) a.objdump = argv[++i];
+    else if (s == "--width" && i+1 < argc) a.pad = std::max(32, (int)std::strtol(argv[++i], nullptr, 0));
     else if (s == "--help" || s == "-h") { usage(argv[0]); std::exit(0); }
     else if (s == "--debug") { setenv("DEBUG_MUTATOR", "1", 1); }
     else if (s == "--debug-log" && i+1 < argc) { setenv("DEBUG_LOG", argv[++i], 1); }
@@ -272,21 +288,30 @@ static Args parse_args(int argc, char** argv) {
   return a;
 }
 
-// ---------- Mutate once, infer output length ----------
+// ---------- Mutate once (prefers afl_custom_fuzz_b if available) ----------
 static std::vector<unsigned char> mutate_once(afl_fuzz_fn afl_custom_fuzz,
+                                              afl_fuzz_b_fn afl_custom_fuzz_b,
                                               const std::vector<unsigned char>& before,
                                               std::vector<unsigned char>& scratch_outbuf,
                                               unsigned int seed) {
-  // Ensure scratch buffer is ample
-  scratch_outbuf.assign(std::max<size_t>(before.size() + 16, 4096), 0);
+  if (afl_custom_fuzz_b) {
+    // Use old API to get authoritative length
+    unsigned char* out_ptr = nullptr;
+    size_t n = afl_custom_fuzz_b(const_cast<unsigned char*>(before.data()), before.size(), &out_ptr, seed);
+    if (!out_ptr || n == 0) return before; // no-op fallback
+    return std::vector<unsigned char>(out_ptr, out_ptr + n);
+  }
 
+  // Fallback to modern API
+  scratch_outbuf.assign(std::max<size_t>(before.size() + 16, 4096), 0);
   unsigned char* mutated = afl_custom_fuzz(
     const_cast<unsigned char*>(before.data()), before.size(),
     scratch_outbuf.data(), scratch_outbuf.size(), seed);
 
-  // Infer output size (mutator may pad to 4B or insert NOPs).
-  size_t after_len = before.size();
+  if (!mutated) return before; // defensive
+
   if (mutated == scratch_outbuf.data()) {
+    // Infer output size by probing non-zero tail (best effort)
     size_t cap = scratch_outbuf.size();
     size_t rounded = ((before.size() + 3u) / 4u) * 4u;
     size_t probe_max = std::min(rounded + 16, cap);
@@ -294,10 +319,10 @@ static std::vector<unsigned char> mutate_once(afl_fuzz_fn afl_custom_fuzz,
     for (size_t i = 0; i < probe_max; ++i) {
       if (scratch_outbuf[i] != 0) last_nz = i + 1;
     }
-    after_len = std::max(rounded, last_nz);
+    size_t after_len = std::max(rounded, last_nz);
     return std::vector<unsigned char>(scratch_outbuf.begin(), scratch_outbuf.begin() + after_len);
   } else {
-    // Heap pointer case: we don't know size — best effort: keep same length.
+    // Heap pointer case: keep same length (mutator didn't provide a size)
     return std::vector<unsigned char>(mutated, mutated + before.size());
   }
 }
@@ -306,12 +331,16 @@ int main(int argc, char** argv) {
   if (std::getenv("NO_COLOR")) g_color = false;
   Args A = parse_args(argc, argv);
 
+  std::string strategy = get_strategy();
+
+
   std::cout << C(C_CYAN) << "[*] Mutator self-test using system disassembler\n" << C(C_RESET);
   std::cout << "    lib:     " << A.lib << "\n"
             << "    objdump: " << A.objdump << "\n"
             << "    seed:    " << A.seed << "\n"
-            << "    repeat:  " << A.repeat << "\n"
-            << "    XLEN:    " << (A.rv64 ? "64 (future)" : "32") << "\n";
+            << "    repeat:  " << A.repeat << "\n" 
+            << "    strategy:" << strategy << "\n"
+            << "    XLEN:    " << (A.rv64 ? "64" : "32") << "\n";
 
   if (!file_exists(A.lib)) {
     std::cerr << C(C_YEL) << "[!] Library not found: " << A.lib << C(C_RESET) << "\n";
@@ -325,17 +354,31 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  auto afl_custom_init  = (afl_init_fn )dlsym(handle, "afl_custom_init");
-  auto afl_custom_fuzz  = (afl_fuzz_fn )dlsym(handle, "afl_custom_fuzz");
-  auto afl_custom_deinit= (afl_deinit_fn)dlsym(handle, "afl_custom_deinit");
+  auto afl_custom_init    = (afl_init_fn  )dlsym(handle, "afl_custom_init");
+  auto afl_custom_fuzz    = (afl_fuzz_fn  )dlsym(handle, "afl_custom_fuzz");
+  auto afl_custom_fuzz_b  = (afl_fuzz_b_fn)dlsym(handle, "afl_custom_fuzz_b");
+  auto afl_custom_deinit  = (afl_deinit_fn)dlsym(handle, "afl_custom_deinit");
   if (!afl_custom_init || !afl_custom_fuzz || !afl_custom_deinit) {
-    std::cerr << "[!] Failed to resolve AFL custom mutator symbols\n";
+    std::cerr << "[!] Failed to resolve required AFL custom mutator symbols\n"
+              << "    Need: afl_custom_init, afl_custom_fuzz, afl_custom_deinit\n"
+              << "    Optional: afl_custom_fuzz_b\n";
     dlclose(handle);
     return 1;
   }
 
   // Init mutator
   afl_custom_init(nullptr);
+
+  // Sanity: verify objdump exists in PATH (best effort)
+  {
+    std::string probe = A.objdump + " --version > /dev/null 2>&1";
+    int rc = std::system(probe.c_str());
+    if (rc != 0) {
+      std::cerr << C(C_YEL) << "[!] Warning: " << A.objdump
+                << " not invokable. Set OBJDUMP env to your riscv64-unknown-elf-objdump.\n"
+                << "    Disassembly output will be empty." << C(C_RESET) << "\n";
+    }
+  }
 
   // Prepare input
   std::vector<unsigned char> cur;
@@ -364,7 +407,6 @@ int main(int argc, char** argv) {
     }
   }
 
-
   std::cout << "    input:   " << cur.size() << " bytes\n";
 
   // Initial hex dump (before any mutation)
@@ -373,17 +415,12 @@ int main(int argc, char** argv) {
   // Repeat mutations
   std::vector<unsigned char> scratch;
   for (int step = 1; step <= A.repeat; ++step) {
-    // Mutate once with seed offset to produce different randomness each step
-    unsigned int step_seed = A.seed + (unsigned) (step - 1);
-    auto next = mutate_once(afl_custom_fuzz, cur, scratch, step_seed);
+    unsigned int step_seed = A.seed + (unsigned)(step - 1);
+    auto next = mutate_once(afl_custom_fuzz, afl_custom_fuzz_b, cur, scratch, step_seed);
 
-    // Hex dump (after this step)
     dump_hex("AFTER  (this step)", next);
+    show_diff_disasm(cur, next, A.objdump, A.rv64, step, A.repeat, A.pad, strategy);
 
-    // Clear boundary disassembly block
-    show_diff_disasm(cur, next, A.objdump, A.rv64, step, A.repeat);
-
-    // Carry forward
     cur.swap(next);
   }
 
