@@ -1,65 +1,59 @@
 # ==========================================================
-#  Makefile.fuzz — AFL++ + Verilator Fuzzing Framework
+# afl/Makefile.fuzz — AFL++ + Verilator Fuzzing Framework
 # ==========================================================
 
-MODULE       := picorv32
-TOP_DIR      := $(PWD)
-OBJ_DIR      := $(TOP_DIR)/verilator/obj_dir
-HARNESS_SRC  := $(TOP_DIR)/harness/tb_$(MODULE)_fuzz.cpp
-RTL_FILE     := $(TOP_DIR)/rtl/cpu/$(MODULE)/$(MODULE).v
-BIN_DIR      := $(TOP_DIR)/firmware/build
+# Project & Locations
+TOP_DIR     := $(abspath ..)
+FUZZ_DIR    := $(abspath .)
 
-FUZZ_DIR     := $(TOP_DIR)/afl
-FUZZ_CONF    := $(FUZZ_DIR)/afl.conf
-FUZZ_EXE     := $(FUZZ_DIR)/afl_$(MODULE)
+MODULE      ?= picorv32
+OBJ_DIR     := $(TOP_DIR)/verilator/obj_dir
+HARNESS_SRC := $(TOP_DIR)/harness/tb_$(MODULE)_fuzz.cpp
+RTL_FILE    := $(TOP_DIR)/rtl/cpu/$(MODULE)/$(MODULE).v
 
-INPUT_DIR    := seeds
-OUTPUT_DIR   := corpora
-TRACE_DIR    := traces/fuzz
-CORES        := 1
-TIMEOUT      := none
-MEM_LIMIT    := none
-MAX_CYCLES   := 10000
+BIN_DIR     := $(TOP_DIR)/firmware/build
 
-# --------------------------------------
-# Load optional AFL config if it exists
-# --------------------------------------
+INPUT_DIR   ?= $(FUZZ_DIR)/seeds
+OUTPUT_DIR  ?= $(FUZZ_DIR)/corpora
+TRACE_DIR   ?= $(FUZZ_DIR)/traces
+CORES       ?= 1
+TIMEOUT     ?= none
+MEM_LIMIT   ?= none
+MAX_CYCLES  ?= 10000
+
+FUZZ_EXE    := $(FUZZ_DIR)/afl_$(MODULE)
+
+# Mutator (auto-build)
+MUT_DIR     := $(FUZZ_DIR)/rv32_mutator
+MUT_SO      := $(MUT_DIR)/librv32_mutator.so
+
+# Optional AFL config
+FUZZ_CONF   := $(FUZZ_DIR)/afl.conf
 ifneq ("$(wildcard $(FUZZ_CONF))","")
 include $(FUZZ_CONF)
 endif
 
-# --------------------------------------
 # Colors
-# --------------------------------------
 YELLOW := \033[1;33m
 GREEN  := \033[1;32m
 BLUE   := \033[1;34m
 RESET  := \033[0m
 
-# --------------------------------------
-# Phony targets
-# --------------------------------------
-.PHONY: all dirs verilate build fuzz crash-traces triage clean check
+# Phony
+.PHONY: all check dirs verilate build fuzz crash-traces triage clean
 
-# --------------------------------------
+# Default
+all: fuzz
+
 # Sanity check
-# --------------------------------------
 check:
 	@which verilator >/dev/null || (echo "$(YELLOW)[ERROR] Verilator not found$(RESET)"; exit 1)
 	@which afl-clang-fast++ >/dev/null || (echo "$(YELLOW)[ERROR] AFL++ not found$(RESET)"; exit 1)
 	@echo "$(GREEN)[OK] Toolchain verified: Verilator + AFL++$(RESET)"
 
-# --------------------------------------
-# Default target
-# --------------------------------------
-all: fuzz
-
-# --------------------------------------
-# Prepare directories and seed
-# --------------------------------------
+# Prepare dirs + auto seeds from firmware
 dirs:
 	@mkdir -p $(INPUT_DIR) $(OUTPUT_DIR) $(TRACE_DIR)
-	@# If one or more .bin files are present in firmware/build, copy them to seeds; otherwise skip
 	@if ls -1 $(BIN_DIR)/*.bin >/dev/null 2>&1; then \
 		echo "$(BLUE)[SEEDS] Found .bin files in $(BIN_DIR); copying to $(INPUT_DIR)$(RESET)"; \
 		cp -n $(BIN_DIR)/*.bin $(INPUT_DIR)/; \
@@ -68,9 +62,7 @@ dirs:
 	fi
 	@echo "$(GREEN)[OK] Directories ready (seeds, corpora, traces)$(RESET)"
 
-# --------------------------------------
 # Verilate
-# --------------------------------------
 verilate:
 	@echo "$(BLUE)[VERILATE] Translating $(MODULE) for fuzzing...$(RESET)"
 	verilator -Wall --x-assign unique --x-initial unique --trace \
@@ -82,10 +74,8 @@ verilate:
 		--Mdir $(OBJ_DIR)
 	@echo "$(GREEN)[OK] Verilated model generated.$(RESET)"
 
-# --------------------------------------
-# Build harness with AFL++
-# --------------------------------------
-build: check verilate
+# Build harness with AFL++ (auto-build mutator)
+build: check dirs verilate $(MUT_SO)
 	@echo "$(BLUE)[BUILD] Compiling harness using AFL++...$(RESET)"
 	$(MAKE) -C $(OBJ_DIR) -f V$(MODULE).mk V$(MODULE)__ALL.a
 
@@ -103,28 +93,34 @@ build: check verilate
 
 	@echo "$(GREEN)[OK] Built fuzz executable: $(FUZZ_EXE)$(RESET)"
 
-# --------------------------------------
+# Build the mutator shared library (auto)
+$(MUT_SO):
+	@echo "$(BLUE)[MUTATOR] Building RV32 hybrid mutator...$(RESET)"
+	$(MAKE) -C $(MUT_DIR)
+	@echo "$(GREEN)[OK] Built $(MUT_SO)$(RESET)"
+
 # Run AFL++
-# --------------------------------------
-fuzz: dirs build
-	@echo "$(BLUE)[RUN] Starting AFL++ fuzzing...$(RESET)"
+fuzz: build
+	@echo "$(BLUE)[RUN] Starting AFL++ fuzzing with custom mutator...$(RESET)"
+	@echo "$(BLUE)      Using mutator: $(MUT_SO)$(RESET)"
 	@if [ "$(CORES)" = "1" ]; then \
+		AFL_CUSTOM_MUTATOR_LIBRARY=$(MUT_SO) \
 		afl-fuzz -i $(INPUT_DIR) -o $(OUTPUT_DIR) -m $(MEM_LIMIT) -t $(TIMEOUT) -- $(FUZZ_EXE) @@; \
 	else \
 		echo "[MASTER] Starting master..."; \
+		AFL_CUSTOM_MUTATOR_LIBRARY=$(MUT_SO) \
 		afl-fuzz -i $(INPUT_DIR) -o $(OUTPUT_DIR) -M main -- $(FUZZ_EXE) @@ & \
 		sleep 2; \
 		for i in $$(seq 1 $$(($(CORES)-1))); do \
 			echo "[SLAVE $$i] Starting worker..."; \
+			AFL_CUSTOM_MUTATOR_LIBRARY=$(MUT_SO) \
 			afl-fuzz -i $(INPUT_DIR) -o $(OUTPUT_DIR) -S slave$$i -- $(FUZZ_EXE) @@ & \
 			sleep 2; \
 		done; \
 		wait; \
 	fi
 
-# --------------------------------------
 # Replay crashes and dump VCD
-# --------------------------------------
 crash-traces:
 	@echo "$(BLUE)[REPLAY] Dumping VCD traces for crashes...$(RESET)"
 	@mkdir -p $(TRACE_DIR)
@@ -135,9 +131,7 @@ crash-traces:
 	done
 	@echo "$(GREEN)[OK] Waveforms stored in $(TRACE_DIR)/$(RESET)"
 
-# --------------------------------------
 # Triage (minimize crash inputs)
-# --------------------------------------
 triage:
 	@echo "$(BLUE)[TRIAGE] Minimizing crashes with afl-tmin...$(RESET)"
 	@mkdir -p $(OUTPUT_DIR)/triaged
@@ -148,10 +142,9 @@ triage:
 	done
 	@echo "$(GREEN)[OK] Triaged crashes saved to $(OUTPUT_DIR)/triaged$(RESET)"
 
-# --------------------------------------
 # Clean
-# --------------------------------------
 clean:
 	@echo "$(YELLOW)[CLEAN] Removing fuzz artifacts...$(RESET)"
 	rm -rf $(OUTPUT_DIR) $(INPUT_DIR) $(TRACE_DIR) $(FUZZ_EXE)
+	@$(MAKE) -C $(MUT_DIR) clean || true
 	@echo "$(GREEN)[OK] Cleanup complete.$(RESET)"
