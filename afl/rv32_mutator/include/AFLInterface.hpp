@@ -3,21 +3,17 @@
 
 extern "C" {
 
-// Modern AFL++ API
-unsigned char *afl_custom_fuzz(unsigned char *buf, size_t buf_size,
-                               unsigned char *out_buf, size_t max_size,
-                               unsigned int seed);
+// Classic AFL++ API we’ll use (stable ABI)
+size_t afl_custom_mutator(void *afl /*unused*/,
+                          unsigned char *buf, size_t buf_size,
+                          unsigned char **out_buf, size_t max_size);
 
-// Older API variant
-size_t afl_custom_fuzz_b(unsigned char *data, size_t size,
-                         unsigned char **out_buf, unsigned int seed);
-
-// Havoc alias
-size_t afl_custom_havoc_mutation(unsigned char *data, size_t size,
-                                 unsigned char **out_buf, unsigned int seed);
+size_t afl_custom_havoc_mutation(void *afl /*unused*/,
+                                 unsigned char *buf, size_t buf_size,
+                                 unsigned char **out_buf, size_t max_size);
 
 // Lifecycle
-int afl_custom_init(void *afl);
+int  afl_custom_init(void *afl);
 void afl_custom_deinit(void);
 
 } // extern "C"

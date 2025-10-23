@@ -108,6 +108,11 @@ fuzz-status:
 	@echo "$(BLUE)[STATUS] MUTATOR=$(MUT_SO)$(RESET)"
 	@ls -ld $(AFL_DIR)/../seeds $(AFL_DIR)/../corpora $(AFL_DIR)/../traces 2>/dev/null || true
 
+
+clean: sim-clean firmware-clean mutator-clean fuzz-clean
+	@echo "$(BLUE)[CLEAN] All cleanups done!$(RESET)"
+
+
 # ======================================================================
 # AFL/Makefile.fuzz — AFL++ + Verilator + RV32 Mutator Framework
 # ======================================================================

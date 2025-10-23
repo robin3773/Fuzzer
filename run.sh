@@ -125,7 +125,7 @@ export MAX_CYCLES="$MAX_CYCLES"
 
 # Preserve these env vars in the target:
 # NOTE: space-separated list (not comma-separated)
-export AFL_KEEP_ENV="CRASH_DIR,MAX_CYCLES,RV32_STRATEGY,RV32_ENABLE_C,DEBUG_MUTATOR"
+export AFL_KEEP_ENV="CRASH_DIR:MAX_CYCLES:RV32_STRATEGY:RV32_ENABLE_C:DEBUG_MUTATOR"
 
 # Optional AFL debug (very chatty)
 if [[ "$AFL_DEBUG_FLAG" == "1" ]]; then
@@ -145,7 +145,7 @@ cat <<BANNER
   Mutator SO   : $MUTATOR_SO
   Harness Bin  : $FUZZ_BIN
   Strategy     : $RV32_STRATEGY
-  Enable C     : $RV32_ENABLE_C
+  Enable C     : $ENABLE_C
   Debug        : $DEBUG_MUTATOR (AFL_DEBUG=$AFL_DEBUG_FLAG)
   Cores        : $CORES
   Timeout      : $TIMEOUT
@@ -179,7 +179,7 @@ cd "$AFL_DIR"
 # Compose AFL base args with clean handling of 'none'
 AFL_BASE=(afl-fuzz -i "$SEEDS_DIR" -o "$CORPORA_DIR")
 if [[ "$MEM_LIMIT" != "none" ]]; then AFL_BASE+=(-m "$MEM_LIMIT"); fi
-if [[ "$TIMEOUT"   != "none" ]]; then AFL_BASE+=(-t "$TIMEOUT");   fi
+if [[ "$TIMEOUT"   != "none" ]]; then AFL_BASE+=(-t "$TIMEOUT");   fi # <-- THIS IS THE FIX
 
 TARGET=(-- "$FUZZ_BIN" @@)
 

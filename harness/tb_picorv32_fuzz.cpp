@@ -46,9 +46,16 @@ static void read_all_fd(int fd) {
 
 int main(int argc, char **argv) {
   Verilated::commandArgs(argc, argv);
+
+  // --- THIS BLOCK IS THE FIX ---
+  // Seed the Verilator RNG to prevent instability
 #if VL_VER_MAJOR >= 5
   Verilated::randReset(0);
+#else
+  Verilated::randSeed(0);
 #endif
+  // --- END OF FIX ---
+
 
   // Prefer @@ file (argv[1]); else stdin
   if (argc > 1 && argv[1][0] != '-') {

@@ -1,0 +1,6 @@
+# environment variables:
+AFL_CUSTOM_INFO_PROGRAM=./afl/afl_picorv32
+AFL_CUSTOM_INFO_PROGRAM_ARGV=@@
+AFL_CUSTOM_INFO_OUT=out/default
+# command line:
+'/usr/local/bin/afl-fuzz' '-i' 'seeds' '-o' 'out' '--' './afl/afl_picorv32' '@@'
