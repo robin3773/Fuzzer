@@ -93,7 +93,7 @@ while [[ $# -gt 0 ]]; do
     --bin)             FUZZ_BIN="$(realpath -m "$2")"; shift 2 ;;
     --afl-args)        AFL_EXTRA_ARGS="$2"; shift 2 ;;
     --no-build)        NO_BUILD=1; shift ;;
-    --debug)           DEBUG_MUTATOR=1; AFL_DEBUG_FLAG=1; shift ;;
+    --debug)           DEBUG_MUTATOR=0; AFL_DEBUG_FLAG=0; shift ;;
     --max-cycles)      MAX_CYCLES="$2"; shift 2 ;;
     -h|--help)         usage; exit 0 ;;
     *) log "[!] Unknown option: $1"; usage; exit 1 ;;
@@ -125,7 +125,7 @@ export MAX_CYCLES="$MAX_CYCLES"
 
 # Preserve these env vars in the target:
 # NOTE: space-separated list (not comma-separated)
-export AFL_KEEP_ENV="CRASH_DIR:MAX_CYCLES:RV32_STRATEGY:RV32_ENABLE_C:DEBUG_MUTATOR"
+export AFL_KEEP_ENV="CRASH_DIR:MAX_CYCLES:RV32_STRATEGY:RV32_ENABLE_C"
 
 # Optional AFL debug (very chatty)
 if [[ "$AFL_DEBUG_FLAG" == "1" ]]; then

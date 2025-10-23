@@ -22,26 +22,26 @@ static RV32Mutator &get_mut() {
 extern "C" {
 
 // AFL++ calls this once per forkserver instance
-int afl_custom_init(void * /*afl*/) {
-  (void)get_mut();
-  mut::Random::seed((uint32_t)time(nullptr));
-  std::fprintf(stderr,
-               "[mutator] RV32 hybrid mutator initialized. pid=%d time=%ld\n",
-               (int)getpid(), (long)time(nullptr));
-  return 0;
-}
+  int afl_custom_init(void * /*afl*/) {
+    (void)get_mut();
+    mut::Random::seed((uint32_t)time(nullptr));
+    std::fprintf(stderr,
+                "[mutator] RV32 hybrid mutator initialized. pid=%d time=%ld\n",
+                (int)getpid(), (long)time(nullptr));
+    return 0;
+  }
 
-void afl_custom_deinit(void) {
-  std::fprintf(stderr, "[mutator] deinit\n");
-  MutatorDebug::deinit();
-}
+  void afl_custom_deinit(void) {
+    std::fprintf(stderr, "[mutator] deinit\n");
+    MutatorDebug::deinit();
+  }
 
 /*
  * Classic AFL++ API: afl_custom_mutator()
  * - We ignore AFL's out_buf and allocate our own in mutateStream()
  * - We return the exact produced length via last_out_len()
  */
-size_t afl_custom_mutator(/* afl_state_t *afl */ void * /*unused*/,
+  size_t afl_custom_mutator(/* afl_state_t *afl */ void * /*unused*/,
                           unsigned char *buf, size_t buf_size,
                           unsigned char **out_buf, size_t max_size) {
   RV32Mutator &m = get_mut();
@@ -52,9 +52,9 @@ size_t afl_custom_mutator(/* afl_state_t *afl */ void * /*unused*/,
   unsigned char *res = m.mutateStream(buf, buf_size, nullptr, max_size);
   size_t out_len = m.last_out_len();
 
-  std::fprintf(stderr,
-               "[mutator/mutator] in_len=%zu max_size=%zu -> out=%p out_len=%zu\n",
-               buf_size, max_size, (void *)res, out_len);
+  // // std::fprintf(stderr,
+  //              "[mutator/mutator] in_len=%zu max_size=%zu -> out=%p out_len=%zu\n",
+  //              buf_size, max_size, (void *)res, out_len);
 
   if (!res) return 0;
   if (out_len == 0) { res[0] = 0; out_len = 1; }
@@ -70,8 +70,6 @@ size_t afl_custom_havoc_mutation(/* afl_state_t *afl */ void * /*unused*/,
                                  unsigned char *buf, size_t buf_size,
                                  unsigned char **out_buf, size_t max_size) {
   size_t n = afl_custom_mutator(nullptr, buf, buf_size, out_buf, max_size);
-  std::fprintf(stderr, "[mutator/havoc] in_len=%zu -> out_len=%zu\n",
-               buf_size, n);
   return n;
 }
 
