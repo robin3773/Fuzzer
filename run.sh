@@ -36,7 +36,7 @@ CRASH_DIR=""                      # computed after args
 # ---------- Configurable params ----------
 CORES="${CORES:-1}"
 MEM_LIMIT="${MEM_LIMIT:-4G}"      # e.g., 4G or 'none'
-TIMEOUT="${TIMEOUT:-10000}"       # ms or 'none'
+TIMEOUT="${TIMEOUT:-100000}"       # ms or 'none'
 STRATEGY="${RV32_STRATEGY:-HYBRID}"
 ENABLE_C="${RV32_ENABLE_C:-1}"
 DEBUG_MUTATOR="${DEBUG_MUTATOR:-0}"
@@ -93,7 +93,7 @@ while [[ $# -gt 0 ]]; do
     --bin)             FUZZ_BIN="$(realpath -m "$2")"; shift 2 ;;
     --afl-args)        AFL_EXTRA_ARGS="$2"; shift 2 ;;
     --no-build)        NO_BUILD=1; shift ;;
-    --debug)           DEBUG_MUTATOR=0; AFL_DEBUG_FLAG=0; shift ;;
+  --debug)           DEBUG_MUTATOR=1; AFL_DEBUG_FLAG=1; shift ;;
     --max-cycles)      MAX_CYCLES="$2"; shift 2 ;;
     -h|--help)         usage; exit 0 ;;
     *) log "[!] Unknown option: $1"; usage; exit 1 ;;
@@ -115,6 +115,10 @@ CRASH_DIR="${RUN_DIR}/logs/crash"
 mkdir -p "$CRASH_DIR"
 echo "[SETUP] Crash logs will go to: $CRASH_DIR"
 
+# Optional traces directory inside run dir (for VCD/log triage)
+TRACES_DIR="${RUN_DIR}/traces"
+mkdir -p "$TRACES_DIR"
+
 # ---------- Environment for AFL & mutator ----------
 export AFL_SKIP_CPUFREQ=1
 export AFL_CUSTOM_MUTATOR_LIBRARY="$MUTATOR_SO"
@@ -123,9 +127,12 @@ export RV32_ENABLE_C="$ENABLE_C"
 export DEBUG_MUTATOR="$DEBUG_MUTATOR"
 export MAX_CYCLES="$MAX_CYCLES"
 
-# Preserve these env vars in the target:
-# NOTE: space-separated list (not comma-separated)
-export AFL_KEEP_ENV="CRASH_DIR:MAX_CYCLES:RV32_STRATEGY:RV32_ENABLE_C"
+# Propagate crash directory to harness using the name it expects
+export CRASH_LOG_DIR="$CRASH_DIR"
+export TRACE_DIR="$TRACES_DIR"
+
+# Preserve these env vars in the target (SPACE-separated list)
+export AFL_KEEP_ENV="CRASH_LOG_DIR TRACE_DIR MAX_CYCLES RV32_STRATEGY RV32_ENABLE_C"
 
 # Optional AFL debug (very chatty)
 if [[ "$AFL_DEBUG_FLAG" == "1" ]]; then

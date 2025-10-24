@@ -69,6 +69,14 @@ public:
   uint32_t rvfi_insn() const override { return top_->rvfi_insn; }
   uint32_t rvfi_pc_rdata() const override { return top_->rvfi_pc_rdata; }
 
+  bool rvfi_valid() const override { return top_->rvfi_valid; }
+  uint32_t rvfi_pc_wdata() const override { return top_->rvfi_pc_wdata; }
+  uint32_t rvfi_rd_addr() const override { return top_->rvfi_rd_addr; }
+  uint32_t rvfi_rd_wdata() const override { return top_->rvfi_rd_wdata; }
+  uint32_t rvfi_mem_addr() const override { return top_->rvfi_mem_addr; }
+  uint32_t rvfi_mem_rmask() const override { return top_->rvfi_mem_rmask; }
+  uint32_t rvfi_mem_wmask() const override { return top_->rvfi_mem_wmask; }
+
 private:
   Vpicorv32* top_ = nullptr;
 };

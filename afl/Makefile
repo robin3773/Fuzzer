@@ -54,7 +54,7 @@ check:
 	@echo "$(GREEN)[OK] Toolchain verified: Verilator + AFL++$(RESET)"
 
 dirs:
-	@mkdir -p $(SEEDS_DIR) $(CORPORA_DIR) $(TRACE_DIR)
+	@mkdir -p $(SEEDS_DIR)
 	@echo "$(GREEN)[OK] Directories ready$(RESET)"
 
 # ==========================================================

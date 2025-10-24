@@ -12,17 +12,15 @@ Vtop.exe
 **/V*.mk
 
 # ===== Runtime working directories & AFL outputs =====
-/workdir/
-/workdir_latest/
-/corpora/
-/corpora/*
-/corpora/**/*
-/traces/*.vcd
-/traces/*.log
+# Ignore the entire workdir and all timestamped runs
+workdir/
+workdir_latest/
 
-# If you keep AFL outputs at top-level corpora/queue etc:
+# Ignore any folder named 'corpora' anywhere in the tree
 corpora/
-corpora/**
+
+# Ignore any folder named 'traces' anywhere in the tree
+traces/
 
 # ===== Simulation artifacts =====
 *.vcd
