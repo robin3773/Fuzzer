@@ -16,7 +16,7 @@ TEST_SRC    := mutator_selftest.cpp
 SEED    ?= 12345
 REPEAT  ?= 1
 INPUT   ?=
-OBJDUMP ?= riscv64-unknown-elf-objdump
+OBJDUMP ?= riscv32-unknown-elf-objdump
 
 all: $(TEST_BIN)
 

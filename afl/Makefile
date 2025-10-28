@@ -16,7 +16,8 @@ OBJ_DIR     := $(TOP_DIR)/verilator/obj_dir
 HARNESS_DIR := $(TOP_DIR)/afl_harness
 HARNESS_SRCS := \
   $(HARNESS_DIR)/harness_main.cpp \
-  $(HARNESS_DIR)/cpu_$(MODULE).cpp
+	$(HARNESS_DIR)/cpu_$(MODULE).cpp \
+	$(HARNESS_DIR)/spike_process.cpp
 # (headers are automatically included)
 # ------------------------------------------------------------
 
@@ -136,4 +137,5 @@ help:
 	@echo "$(BLUE)Mutator:$(RESET)"
 	@echo "  $(GREEN)MUT_SO=$(MUT_SO)$(RESET)"
 	@echo ""
+
 # ==========================================================

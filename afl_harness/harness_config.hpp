@@ -41,7 +41,7 @@ struct HarnessConfig {
     }
     crash_dir = cd;
     printf("[HARNESS/CONFIG] Using crash directory: %s\n", crash_dir.c_str());
-    objdump   = getenv_or("OBJDUMP", "riscv64-unknown-elf-objdump");
+    objdump   = getenv_or("OBJDUMP", "riscv32-unknown-elf-objdump");
     printf("[HARNESS/CONFIG] Using objdump: %s\n", objdump.c_str());
     std::string x = getenv_or("XLEN", "32");
     xlen = (x == "64") ? 64 : 32;

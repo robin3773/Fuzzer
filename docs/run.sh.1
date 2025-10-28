@@ -1,0 +1,265 @@
+.TH RUN.SH 1 "October 27, 2025" "Fuzzer" "User Commands"
+.SH NAME
+run.sh \- AFL++ + RV32 mutator launcher for fuzzing picorv32
+.SH SYNOPSIS
+.B run.sh
+.RI [ options ]
+.SH DESCRIPTION
+.B run.sh
+is a convenience wrapper around
+.BR afl-fuzz (1)
+that builds and launches the Verilator\-based harness and custom RV32
+mutator for fuzzing the picorv32 core. It creates a timestamped run
+folder under
+.I workdir/
+containing corpora, logs, traces, and a consolidated run log.
+.PP
+It passes configuration via environment variables to the harness
+and preserves relevant variables through AFL using
+.B AFL_KEEP_ENV.
+.SH OPTIONS
+.TP
+.BR -c ,\ --cores " " \fIN\fR
+Number of AFL workers to launch. 1 runs a single instance; >1 spawns a
+master and multiple slaves. Default: value of
+.BR CORES 
+(or 1).
+.TP
+.BR -s ,\ --strategy " " \fISTR\fR
+Selects the mutation strategy for the custom RV32 mutator.
+Allowed values: RAW | IR | HYBRID | AUTO. Default: value of
+.B RV32_STRATEGY
+(or HYBRID).
+.TP
+.B --enable-c \fI0|1\fR
+Enable compressed instruction (RVC) mutation path. Default: value of
+.B RV32_ENABLE_C
+(or 1).
+.TP
+.BR -m ,\ --mem " " \fILIMIT\fR
+AFL memory limit. Examples: 4G, 800M, or
+.B none
+(disable). Default: value of
+.B MEM_LIMIT
+(or 4G).
+.TP
+.BR -t ,\ --timeout " " \fIMS\fR
+AFL per\-run timeout in milliseconds, or
+.B none
+(disable). Default: value of
+.B TIMEOUT
+(or 100000).
+.TP
+.B --seeds \fIDIR\fR
+Seed corpus directory. Default:
+.I ./seeds
+under the project root.
+.TP
+.B --out \fIDIR\fR
+AFL output/corpora directory. If omitted, a run\-scoped corpora directory is
+created under the timestamped run folder.
+.TP
+.B --runs \fIDIR\fR
+Base directory where timestamped runs are created. Default:
+.I ./workdir
+under the project root.
+.TP
+.B --mutator \fIPATH\fR
+Path to the custom mutator shared object. Default:
+.I afl/rv32_mutator/librv32_mutator.so
+.TP
+.B --bin \fIPATH\fR
+Path to the harness binary. Default:
+.I afl/afl_picorv32
+.TP
+.B --afl-args "\fIARGS\fR"
+Extra arguments passed verbatim to
+.BR afl-fuzz (1)
+(e.g., "-d -x dict").
+.TP
+.B --no-build
+Skip building the mutator and harness. The script will exit if the
+artifacts are missing.
+.TP
+.B --debug
+Enable verbose debugging: sets
+.B DEBUG_MUTATOR=1
+and
+.B AFL_DEBUG=1
+for AFL.
+.TP
+.B --max-cycles \fIN\fR
+Maximum number of DUT cycles per test case, passed to the harness as
+.B MAX_CYCLES.
+Default: 50000.
+.TP
+.B --golden \fIMODE\fR
+Golden reference mode for the harness. Supported values:
+.RS
+.IP \(bu 2
+.B live
+Run Spike in parallel and compare per\-commit (default if SPIKE_BIN is set).
+.IP \(bu
+.B off
+Disable golden comparison.
+.IP \(bu
+.B batch
+Reserved for offline checking (use tools/replay). In\-harness treated as off.
+.IP \(bu
+.B replay
+Reserved for offline replay. In\-harness treated as off.
+.RE
+Default: value of
+.B GOLDEN_MODE
+(or live).
+.TP
+.B --spike \fIPATH\fR
+Path to Spike binary. Sets
+.B SPIKE_BIN
+and enables live golden mode.
+.TP
+.B --pk \fIPATH\fR
+Path to RISC\-V proxy kernel (optional). Sets
+.B PK_BIN
+and runs Spike as "spike -l --isa=... pk elf".
+.TP
+.B --objcopy \fIPATH\fR
+Path to GNU objcopy to wrap the fuzz input as a minimal ELF for Spike.
+Sets
+.B OBJCOPY_BIN.
+Defaults prefer 32\-bit objcopy with 64\-bit fallback.
+.TP
+.B --isa \fISTR\fR
+Spike ISA string (e.g., rv32imc). Sets
+.B SPIKE_ISA.
+Default: rv32imc.
+.TP
+.B --trace-mode \fIon|off\fR
+Enable or disable trace writing in the harness. When on, the harness writes
+.I traces/dut.trace
+and, in golden live mode,
+.I traces/golden.trace.
+Default: on.
+.TP
+.B --exec-backend \fIB\fR
+Execution backend for the harness. Supported values:
+.B verilator
+(current) and
+.B fpga
+(reserved). Sets
+.B EXEC_BACKEND.
+Default: verilator.
+.TP
+.BR -h ,\ --help
+Show help and exit.
+.SH ENVIRONMENT
+.TP
+.B AFL_CUSTOM_MUTATOR_LIBRARY
+Set automatically to the mutator .so path.
+.TP
+.B RV32_STRATEGY
+Mutator strategy (RAW|IR|HYBRID|AUTO). Sourced from
+.B --strategy.
+.TP
+.B RV32_ENABLE_C
+Enable compressed instruction generation (0|1). Sourced from
+.B --enable-c.
+.TP
+.B DEBUG_MUTATOR
+Enable mutator debugging (0|1). Sourced from
+.B --debug.
+.TP
+.B MAX_CYCLES
+Maximum DUT cycles per test case. Sourced from
+.B --max-cycles.
+.TP
+.B CRASH_LOG_DIR
+Crash artifact directory for the harness. Set to
+.I <run>/logs/crash
+by the script.
+.TP
+.B TRACE_DIR
+Trace directory for the harness. Set to
+.I <run>/traces
+by the script.
+.TP
+.B GOLDEN_MODE
+Golden model mode (live|off|batch|replay). Sourced from
+.B --golden.
+.TP
+.B SPIKE_BIN
+Path to Spike. Sourced from
+.B --spike.
+.TP
+.B SPIKE_ISA
+Spike ISA string (e.g., rv32imc). Sourced from
+.B --isa.
+.TP
+.B PK_BIN
+Path to proxy kernel. Sourced from
+.B --pk.
+.TP
+.B OBJCOPY_BIN
+Path to objcopy. Sourced from
+.B --objcopy.
+.TP
+.B EXEC_BACKEND
+Execution backend (verilator|fpga). Sourced from
+.B --exec-backend.
+.TP
+.B TRACE_MODE
+Enable/disable trace writing (on|off). Sourced from
+.B --trace-mode.
+.TP
+.B AFL_KEEP_ENV
+The script preserves these variables through AFL: CRASH_LOG_DIR, TRACE_DIR,
+MAX_CYCLES, RV32_STRATEGY, RV32_ENABLE_C, GOLDEN_MODE, EXEC_BACKEND, TRACE_MODE,
+SPIKE_BIN, SPIKE_ISA, PK_BIN, OBJCOPY_BIN.
+.TP
+.B AFL_SKIP_CPUFREQ
+Set to 1 to avoid CPU frequency checks by AFL (exported by the script).
+.SH FILES
+.TP
+.I workdir/<STAMP>/
+Per\-run directory created by the script.
+.TP
+.I workdir/<STAMP>/corpora/
+AFL output (queue, findings, etc.).
+.TP
+.I workdir/<STAMP>/logs/crash/
+Crash artifacts written by the harness.
+.TP
+.I workdir/<STAMP>/traces/
+Per\-commit traces: dut.trace and, in golden\-live mode, golden.trace.
+.TP
+.I workdir/<STAMP>/fuzz.log
+Consolidated run log. In multi\-core mode, per\-instance logs are merged here.
+.SH EXAMPLES
+.TP
+Single core, default strategy and timeouts:
+.nf
+run.sh --cores 1
+.fi
+.TP
+Multi\-core with master/slaves, no memory limit and no timeout:
+.nf
+run.sh -c 4 -m none -t none --seeds ./seeds
+.fi
+.TP
+Enable live Spike comparison with rv32imc ISA, and traces on:
+.nf
+run.sh --golden live --spike /opt/riscv/bin/spike --isa rv32imc --trace-mode on
+.fi
+.TP
+Run with existing binaries, extra AFL args, and debug enabled:
+.nf
+run.sh --no-build --afl-args "-d -M main" --debug
+.fi
+.SH NOTES
+Verilator builds should be deterministic for reproducible fuzzing
+(use --x\-assign 0 and --x\-initial 0).
+Core dumps are disabled during fuzzing (ulimit -c 0) to reduce noise.
+.SH SEE ALSO
+afl-fuzz(1), spike(1)
+.SH AUTHORS
+Project maintainers.

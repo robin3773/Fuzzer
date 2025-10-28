@@ -45,6 +45,40 @@ public:
     writeTextAtomically(log_path, log);
   }
 
+  // Write a crash with extra textual details (golden vs dut snapshot, repro, etc.)
+  void writeCrashDetailed(const std::string &reason,
+                          uint32_t pc,
+                          uint32_t insn,
+                          unsigned cycle,
+                          const std::vector<unsigned char> &input,
+                          const std::string &details) const {
+    const std::string base = makeBaseName(reason, cycle);
+    const std::string bin_path = base + ".bin";
+    const std::string log_path = base + ".log";
+    const std::string info_path = base + ".details.txt";
+
+    writeFile(bin_path, input);
+
+    std::string log;
+    log.reserve(4096);
+    log += "Reason: " + reason + "\n";
+    log += "Cycle: " + std::to_string(cycle) + "\n";
+    log += "PC: 0x" + hex32(pc) + "\n";
+    log += "Instruction: 0x" + hex32(insn) + "\n\n";
+    log += "Hexdump:\n";
+    log += utils::hexdump(input);
+    log += "\n";
+
+    std::string dasm = utils::disassemble(input, cfg_.objdump, cfg_.xlen);
+    if (!dasm.empty()) {
+      log += "Disassembly:\n";
+      log += dasm;
+    }
+
+    writeTextAtomically(log_path, log);
+    writeTextAtomically(info_path, details);
+  }
+
 private:
   HarnessConfig cfg_;
 

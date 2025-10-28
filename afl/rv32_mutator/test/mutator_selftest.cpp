@@ -206,7 +206,7 @@ struct Args {
   std::string in  = "";
   unsigned int seed = 12345;
   int repeat = 1;
-  std::string objdump = env_or("OBJDUMP", "riscv64-unknown-elf-objdump");
+  std::string objdump = env_or("OBJDUMP", "riscv32-unknown-elf-objdump");
   bool rv64 = false;
   size_t pad = 64;
 };
@@ -214,7 +214,7 @@ static void usage(const char* prog) {
   std::cout <<
     "Usage: " << prog << " [--lib path.so] [--in input.bin] [--seed N] [--repeat N] [--objdump PATH] [--width W]\n"
     "Env:   NO_COLOR=1 disables colors\n"
-    "       OBJDUMP=/path/to/riscv64-unknown-elf-objdump (default)\n"
+    "       OBJDUMP=/path/to/riscv32-unknown-elf-objdump (default)\n"
     "       XLEN=32|64 (affects disassembly only)\n";
 }
 static Args parse_args(int argc, char** argv) {

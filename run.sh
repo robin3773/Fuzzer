@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # ==========================================================
-# run_fuzz.sh — AFL++ + RV32 Mutator launcher (CLI-friendly)
+# run.sh — AFL++ + RV32 Mutator launcher (CLI-friendly)
 # ==========================================================
 # Examples:
-#   ./run_fuzz.sh --cores 8 --strategy RAW --timeout 500 --debug
-#   ./run_fuzz.sh -c 4 -s HYBRID -m none -t none --seeds ./seeds --out ./corpora
-#   ./run_fuzz.sh --no-build                 # run with existing binaries
-#   ./run_fuzz.sh --afl-args "-d -S test1"   # pass extra args to afl-fuzz
+#   ./run.sh --cores 8 --strategy RAW --timeout 500 --debug
+#   ./run.sh -c 4 -s HYBRID -m none -t none --seeds ./seeds --out ./corpora
+#   ./run.sh --no-build                 # run with existing binaries
+#   ./run.sh --afl-args "-d -S test1"   # pass extra args to afl-fuzz
 #
 # Notes:
 # - Verilator must be built deterministically (use --x-assign 0 --x-initial 0).
@@ -16,7 +16,7 @@
 set -euo pipefail
 
 # ---------- Defaults (match your repo) ----------
-PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"           # project root dir usually is script's dir
 AFL_DIR="$PROJECT_ROOT/afl"
 FUZZ_BIN="$AFL_DIR/afl_picorv32"
 MUTATOR_SO="$AFL_DIR/rv32_mutator/librv32_mutator.so"
@@ -58,7 +58,7 @@ Options:
   -m, --mem LIMIT          AFL memory limit, e.g. 4G or 'none' (default: ${MEM_LIMIT})
   -t, --timeout MS         AFL timeout in ms or 'none' (default: ${TIMEOUT})
       --seeds DIR          Input seeds dir (default: ${SEEDS_DIR})
-      --out DIR            AFL corpora/output dir (if omitted, uses a timestamped run dir)
+  -o, --out DIR            AFL corpora/output dir (if omitted, uses a timestamped run dir)
       --runs DIR           Base directory to store timestamped runs (default: ${RUNS_DIR_DEFAULT})
       --mutator PATH       Custom mutator .so (default: ${MUTATOR_SO})
       --bin PATH           Harness binary (default: ${FUZZ_BIN})
@@ -66,6 +66,13 @@ Options:
       --no-build           Skip building mutator/harness (assume ready)
       --debug              Enable mutator debug (DEBUG_MUTATOR=1) and AFL_DEBUG=1
       --max-cycles N       Pass MAX_CYCLES to harness
+      --golden MODE        GOLDEN_MODE = live | off | batch | replay (default: live)
+      --spike PATH         Path to Spike binary (SPIKE_BIN)
+      --pk PATH            Path to proxy kernel (PK_BIN)
+      --objcopy PATH       Path to objcopy (OBJCOPY_BIN)
+      --isa STR            Spike ISA string, e.g., rv32imc (SPIKE_ISA)
+      --trace-mode on|off  Enable/disable harness trace writing (default: on)
+      --exec-backend B     EXEC_BACKEND = verilator | fpga (default: verilator)
   -h, --help               Show this help and exit
 
 Examples:
@@ -76,7 +83,7 @@ Examples:
 EOF
 }
 
-log() { echo -e "$@"; }
+log() { printf "%s\n" "$@"; }
 
 # ---------- Parse args ----------
 while [[ $# -gt 0 ]]; do
@@ -93,8 +100,15 @@ while [[ $# -gt 0 ]]; do
     --bin)             FUZZ_BIN="$(realpath -m "$2")"; shift 2 ;;
     --afl-args)        AFL_EXTRA_ARGS="$2"; shift 2 ;;
     --no-build)        NO_BUILD=1; shift ;;
-  --debug)           DEBUG_MUTATOR=1; AFL_DEBUG_FLAG=1; shift ;;
+    --debug)           DEBUG_MUTATOR=1; AFL_DEBUG_FLAG=1; shift ;;
     --max-cycles)      MAX_CYCLES="$2"; shift 2 ;;
+    --golden)          GOLDEN_MODE="$2"; shift 2 ;;
+    --spike)           SPIKE_BIN="$(realpath -m "$2")"; shift 2 ;;
+    --pk)              PK_BIN="$(realpath -m "$2")"; shift 2 ;;
+    --objcopy)         OBJCOPY_BIN="$(realpath -m "$2")"; shift 2 ;;
+    --isa)             SPIKE_ISA="$2"; shift 2 ;;
+    --trace-mode)      TRACE_MODE="$2"; shift 2 ;;
+    --exec-backend)    EXEC_BACKEND="$2"; shift 2 ;;
     -h|--help)         usage; exit 0 ;;
     *) log "[!] Unknown option: $1"; usage; exit 1 ;;
   esac
@@ -111,6 +125,7 @@ fi
 mkdir -p "$CORPORA_DIR"
 
 LOG_FILE="${RUN_DIR}/fuzz.log"
+SPIKE_LOG_FILE="${RUN_DIR}/spike.log"
 CRASH_DIR="${RUN_DIR}/logs/crash"
 mkdir -p "$CRASH_DIR"
 echo "[SETUP] Crash logs will go to: $CRASH_DIR"
@@ -130,9 +145,39 @@ export MAX_CYCLES="$MAX_CYCLES"
 # Propagate crash directory to harness using the name it expects
 export CRASH_LOG_DIR="$CRASH_DIR"
 export TRACE_DIR="$TRACES_DIR"
+export SPIKE_LOG_FILE
+
+# Golden/trace/backend defaults (honor pre-set env if provided)
+export GOLDEN_MODE="${GOLDEN_MODE:-live}"
+export EXEC_BACKEND="${EXEC_BACKEND:-verilator}"
+export TRACE_MODE="${TRACE_MODE:-on}"
+
+# Tooling defaults (if not provided via CLI/env)
+: "${SPIKE_BIN:=/opt/riscv/bin/spike}"
+: "${SPIKE_ISA:=rv32imc}"
+: "${PK_BIN:=/opt/riscv/riscv64-unknown-elf/bin/pk}"
+: "${OBJCOPY_BIN:=riscv32-unknown-elf-objcopy}"
+
+# Warn if defaults not found; allow harness fallback by unsetting
+if ! command -v "$SPIKE_BIN" >/dev/null 2>&1; then
+  echo "[WARN] SPIKE_BIN not found at '$SPIKE_BIN' and not on PATH. Golden mode may be disabled."
+fi
+if ! command -v "$OBJCOPY_BIN" >/dev/null 2>&1; then
+  echo "[WARN] OBJCOPY_BIN '$OBJCOPY_BIN' not found; harness will try 64-bit fallback."
+  unset OBJCOPY_BIN
+fi
+if [[ -n "${PK_BIN:-}" && ! -x "$PK_BIN" ]]; then
+  echo "[WARN] PK_BIN '$PK_BIN' not executable; Spike will run without pk."
+fi
+
+# Export detected/provided tooling
+if [[ -n "${SPIKE_BIN:-}" ]];   then export SPIKE_BIN; fi
+if [[ -n "${SPIKE_ISA:-}" ]];   then export SPIKE_ISA; fi
+if [[ -n "${PK_BIN:-}" ]];      then export PK_BIN; fi
+if [[ -n "${OBJCOPY_BIN:-}" ]]; then export OBJCOPY_BIN; fi
 
 # Preserve these env vars in the target (SPACE-separated list)
-export AFL_KEEP_ENV="CRASH_LOG_DIR TRACE_DIR MAX_CYCLES RV32_STRATEGY RV32_ENABLE_C"
+export AFL_KEEP_ENV="CRASH_LOG_DIR TRACE_DIR MAX_CYCLES RV32_STRATEGY RV32_ENABLE_C GOLDEN_MODE EXEC_BACKEND TRACE_MODE SPIKE_BIN SPIKE_ISA PK_BIN OBJCOPY_BIN SPIKE_LOG_FILE"
 
 # Optional AFL debug (very chatty)
 if [[ "$AFL_DEBUG_FLAG" == "1" ]]; then
@@ -140,8 +185,24 @@ if [[ "$AFL_DEBUG_FLAG" == "1" ]]; then
   export AFL_DEBUG_CHILD=1
 fi
 
-# Avoid core dump + core_pattern warning during fuzzing runs
+# Disable core dumps to avoid core_pattern warnings during AFL++ fuzzing runs
 ulimit -c 0 || true
+
+# ---------- Host core_pattern check (AFL compatibility) ----------
+# If the kernel core_pattern pipes to an external utility (starts with '|'),
+# AFL++ will abort unless AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1 is set.
+# We auto-enable the env var to keep runs smooth, and print a helpful note.
+CORE_PATTERN="$(cat /proc/sys/kernel/core_pattern 2>/dev/null || true)"
+if [[ "$CORE_PATTERN" == \|* && -z "${AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES:-}" ]]; then
+  export AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1
+  echo "[NOTE] core_pattern is piped to an external handler."
+  echo "       Setting AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1 to allow AFL to run."
+  echo "       Recommended (requires sudo) to avoid delays:"
+  echo "         echo core | sudo tee /proc/sys/kernel/core_pattern"
+fi
+
+# Preserve this env var in children as well (harmless if unset)
+export AFL_KEEP_ENV="$AFL_KEEP_ENV AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES"
 
 # ---------- Pretty banner ----------
 cat <<BANNER
@@ -160,17 +221,30 @@ cat <<BANNER
   Seeds Dir    : $SEEDS_DIR
   Output Dir   : $CORPORA_DIR
   Run Log      : $LOG_FILE
+  Spike Log    : $SPIKE_LOG_FILE
   Max Cycles   : $MAX_CYCLES
   Extra AFL    : ${AFL_EXTRA_ARGS:-<none>}
+  Golden Mode  : $GOLDEN_MODE
+  Exec Backend : $EXEC_BACKEND
+  Trace Mode   : $TRACE_MODE
+  Crash Logs   : $CRASH_DIR
+  Trace Dir    : $TRACES_DIR
+  SPIKE_BIN    : ${SPIKE_BIN:-<default>}
+  SPIKE_ISA    : ${SPIKE_ISA:-<default>}
+  PK_BIN       : ${PK_BIN:-<default>}
+  OBJCOPY_BIN  : ${OBJCOPY_BIN:-<default>}
+  AFL_DEBUG_FLAG : $AFL_DEBUG_FLAG
 ==========================================================
 BANNER
 
 # ---------- Preconditions ----------
-if [[ ! -x "$FUZZ_BIN" || ! -f "$MUTATOR_SO" ]] && [[ "$NO_BUILD" -eq 1 ]]; then
-  log "[!] --no-build requested but harness or mutator missing."
-  log "    FUZZ_BIN:   $FUZZ_BIN"
-  log "    MUTATOR_SO: $MUTATOR_SO"
-  exit 1
+if [[ "$NO_BUILD" -eq 1 ]]; then
+  if [[ ! -x "$FUZZ_BIN" || ! -f "$MUTATOR_SO" ]]; then
+    log "[!] --no-build requested but harness or mutator missing."
+    log "    FUZZ_BIN:   $FUZZ_BIN"
+    log "    MUTATOR_SO: $MUTATOR_SO"
+    exit 1
+  fi
 fi
 
 # ---------- Build (unless --no-build) ----------
@@ -186,7 +260,7 @@ cd "$AFL_DIR"
 # Compose AFL base args with clean handling of 'none'
 AFL_BASE=(afl-fuzz -i "$SEEDS_DIR" -o "$CORPORA_DIR")
 if [[ "$MEM_LIMIT" != "none" ]]; then AFL_BASE+=(-m "$MEM_LIMIT"); fi
-if [[ "$TIMEOUT"   != "none" ]]; then AFL_BASE+=(-t "$TIMEOUT");   fi # <-- THIS IS THE FIX
+if [[ "$TIMEOUT"   != "none" ]]; then AFL_BASE+=(-t "$TIMEOUT");   fi  # Add timeout argument if not 'none'
 
 TARGET=(-- "$FUZZ_BIN" @@)
 
@@ -200,15 +274,23 @@ if [[ "$CORES" == "1" ]]; then
 else
   echo "[MASTER] Starting master instance..."
   # shellcheck disable=SC2086
-  "${AFL_BASE[@]}" -M main $AFL_EXTRA_ARGS "${TARGET[@]}" 2>&1 | tee "$LOG_FILE" &
+  MAIN_LOG="${RUN_DIR}/main.log"
+  "${AFL_BASE[@]}" -M main $AFL_EXTRA_ARGS "${TARGET[@]}" 2>&1 | tee "$MAIN_LOG" &
   sleep 2
   for i in $(seq 1 $((CORES - 1))); do
     echo "[SLAVE $i] Starting worker..."
     # shellcheck disable=SC2086
-    "${AFL_BASE[@]}" -S "slave$i" $AFL_EXTRA_ARGS "${TARGET[@]}" >> "$LOG_FILE" 2>&1 &
+    SLAVE_LOG_FILE="${RUN_DIR}/fuzz_slave${i}.log"
+    "${AFL_BASE[@]}" -S "slave$i" $AFL_EXTRA_ARGS "${TARGET[@]}" >> "$SLAVE_LOG_FILE" 2>&1 &
     sleep 2
   done
   wait
+  # Concatenate logs into LOG_FILE for summary (handle case with no slaves)
+  if ls "${RUN_DIR}/fuzz_slave"*.log >/dev/null 2>&1; then
+    cat "$MAIN_LOG" "${RUN_DIR}/fuzz_slave"*.log > "$LOG_FILE"
+  else
+    cp "$MAIN_LOG" "$LOG_FILE"
+  fi
 fi
 
 log "=========================================================="
