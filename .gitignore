@@ -72,3 +72,4 @@ coverage/
 
 # Keep this file tracked; ignore everything above.
 afl/afl_picorv32
+rtl/cpu/picorv32
