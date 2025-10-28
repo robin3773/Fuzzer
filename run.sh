@@ -155,7 +155,7 @@ export TRACE_MODE="${TRACE_MODE:-on}"
 # Tooling defaults (if not provided via CLI/env)
 : "${SPIKE_BIN:=/opt/riscv/bin/spike}"
 : "${SPIKE_ISA:=rv32imc}"
-: "${PK_BIN:=/opt/riscv/riscv64-unknown-elf/bin/pk}"
+: "${PK_BIN:=/opt/riscv/riscv64-linux-gnu/bin/pk}"
 : "${OBJCOPY_BIN:=riscv32-unknown-elf-objcopy}"
 
 # Warn if defaults not found; allow harness fallback by unsetting
@@ -168,6 +168,7 @@ if ! command -v "$OBJCOPY_BIN" >/dev/null 2>&1; then
 fi
 if [[ -n "${PK_BIN:-}" && ! -x "$PK_BIN" ]]; then
   echo "[WARN] PK_BIN '$PK_BIN' not executable; Spike will run without pk."
+  unset PK_BIN
 fi
 
 # Export detected/provided tooling
@@ -231,7 +232,7 @@ cat <<BANNER
   Trace Dir    : $TRACES_DIR
   SPIKE_BIN    : ${SPIKE_BIN:-<default>}
   SPIKE_ISA    : ${SPIKE_ISA:-<default>}
-  PK_BIN       : ${PK_BIN:-<default>}
+  PK_BIN       : ${PK_BIN:-<none>}
   OBJCOPY_BIN  : ${OBJCOPY_BIN:-<default>}
   AFL_DEBUG_FLAG : $AFL_DEBUG_FLAG
 ==========================================================

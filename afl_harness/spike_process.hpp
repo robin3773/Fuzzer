@@ -34,8 +34,9 @@ public:
 
   // set_log_path
   //   Configure where to write Spike's raw output. If non-empty, a file will
-  //   be opened on start(), line-buffered so entries show up live. If the file
-  //   cannot be opened, the run continues without a file.
+  //   be opened on start() in append mode (never truncates), and set to
+  //   line-buffering so entries show up live. If the file cannot be opened,
+  //   the run continues without a file.
   void set_log_path(const std::string& p) { log_path_ = p; }
 
   // Expose command and log file path for diagnostics

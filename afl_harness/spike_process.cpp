@@ -40,7 +40,8 @@ bool SpikeProcess::start(const std::string& spike_bin, const std::string& elf_pa
     return false;
   }
   if (!log_path_.empty()) {
-    log_file_ = std::fopen(log_path_.c_str(), "w");
+    // Open in append mode so we never overwrite previous contents.
+    log_file_ = std::fopen(log_path_.c_str(), "a");
     if (log_file_) {
       // Line-buffer the file so it shows up while running
       setvbuf(log_file_, nullptr, _IOLBF, 0);
