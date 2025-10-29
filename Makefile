@@ -12,8 +12,8 @@ WAVE_FILE     ?= $(TRACE_DIR)/waveform.vcd
 
 AFL_DIR       ?= ./afl
 AFL_MK        ?= $(AFL_DIR)/Makefile.fuzz
-MUT_DIR       ?= $(AFL_DIR)/rv32_mutator
-MUT_SO        ?= $(MUT_DIR)/librv32_mutator.so
+MUT_DIR       ?= $(AFL_DIR)/isa_mutator
+MUT_SO        ?= $(MUT_DIR)/libisa_mutator.so
 
 SIM_ARGS      ?=
 
@@ -62,7 +62,7 @@ help:
 	@echo "    $(GREEN)fuzz-clean$(RESET)     Remove corpora/seeds/traces"
 	@echo ""
 	@echo "  Mutator:"
-	@echo "    $(GREEN)mutator$(RESET)        Build RV32 hybrid mutator (.so)"
+	@echo "    $(GREEN)mutator$(RESET)        Build ISA-aware custom mutator (.so)"
 	@echo "    $(GREEN)mutator-clean$(RESET)  Clean mutator build"
 	@echo ""
 	@echo "  Variables:"
@@ -73,7 +73,7 @@ help:
 # Mutator wrappers
 # ======================================================================
 mutator:
-	@echo "$(BLUE)[MUTATOR] Building RV32 hybrid mutator$(RESET)"
+	@echo "$(BLUE)[MUTATOR] Building ISA-aware mutator$(RESET)"
 	$(Q)$(MAKE) -C $(MUT_DIR)
 	@ls -lh $(MUT_SO) || true
 

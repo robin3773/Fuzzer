@@ -1,0 +1,7 @@
+# Placeholder for future MIPS32 support
+isa: MIPS32
+status: placeholder
+todo:
+  - "Define R/I/J formats with MSB0 bit numbering."
+  - "Add base integer instructions (ADD/SUB/AND/OR/LW/SW/BEQ/J)."
+  - "Incorporate floating-point instructions if applicable."

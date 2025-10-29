@@ -1,0 +1,7 @@
+# Placeholder for future ARMv8-A support
+isa: ARMv8-A
+status: placeholder
+todo:
+  - "Define family-specific formats (R/I/DP) and bit fields."
+  - "Add base integer instructions."
+  - "Incorporate floating-point and SIMD instructions."

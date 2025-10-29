@@ -1,0 +1,39 @@
+include: ../base.yaml
+isa: RV32I
+base_width: 32
+extensions: [I]
+formats:
+  <<: *riscv_formats
+rules:
+  <<: *common_rules
+
+instructions:
+  # Integer register-immediate
+  ADDI: {format: I, opcode: 0b0010011, funct3: 0b000}
+  SLTI: {format: I, opcode: 0b0010011, funct3: 0b010}
+  ANDI: {format: I, opcode: 0b0010011, funct3: 0b111}
+  ORI:  {format: I, opcode: 0b0010011, funct3: 0b110}
+  XORI: {format: I, opcode: 0b0010011, funct3: 0b100}
+
+  # Integer register-register
+  ADD:  {format: R, opcode: 0b0110011, funct3: 0b000, funct7: 0b0000000}
+  SUB:  {format: R, opcode: 0b0110011, funct3: 0b000, funct7: 0b0100000}
+  AND:  {format: R, opcode: 0b0110011, funct3: 0b111, funct7: 0b0000000}
+  OR:   {format: R, opcode: 0b0110011, funct3: 0b110, funct7: 0b0000000}
+  XOR:  {format: R, opcode: 0b0110011, funct3: 0b100, funct7: 0b0000000}
+
+  # Loads / Stores
+  LW:   {format: I, opcode: 0b0000011, funct3: 0b010}
+  LH:   {format: I, opcode: 0b0000011, funct3: 0b001}
+  LB:   {format: I, opcode: 0b0000011, funct3: 0b000}
+  SW:   {format: S, opcode: 0b0100011, funct3: 0b010}
+  SH:   {format: S, opcode: 0b0100011, funct3: 0b001}
+  SB:   {format: S, opcode: 0b0100011, funct3: 0b000}
+
+  # Control flow
+  BEQ:  {format: B, opcode: 0b1100011, funct3: 0b000}
+  BNE:  {format: B, opcode: 0b1100011, funct3: 0b001}
+  JAL:  {format: J, opcode: 0b1101111}
+  JALR: {format: I, opcode: 0b1100111, funct3: 0b000}
+  LUI:  {format: U, opcode: 0b0110111}
+  AUIPC:{format: U, opcode: 0b0010111}

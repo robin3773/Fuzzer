@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==========================================================
-# run.sh — AFL++ + RV32 Mutator launcher (CLI-friendly)
+# run.sh — AFL++ + ISA-aware mutator launcher (CLI-friendly)
 # ==========================================================
 # Examples:
 #   ./run.sh --cores 8 --strategy RAW --timeout 500 --debug
@@ -19,7 +19,7 @@ set -euo pipefail
 PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"           # project root dir usually is script's dir
 AFL_DIR="$PROJECT_ROOT/afl"
 FUZZ_BIN="$AFL_DIR/afl_picorv32"
-MUTATOR_SO="$AFL_DIR/rv32_mutator/librv32_mutator.so"
+MUTATOR_SO="$AFL_DIR/isa_mutator/libisa_mutator.so"
 
 STAMP="$(date +"%d-%b__%H-%M")"
 
@@ -155,7 +155,7 @@ export TRACE_MODE="${TRACE_MODE:-on}"
 # Tooling defaults (if not provided via CLI/env)
 : "${SPIKE_BIN:=/opt/riscv/bin/spike}"
 : "${SPIKE_ISA:=rv32imc}"
-: "${PK_BIN:=/opt/riscv/riscv64-linux-gnu/bin/pk}"
+: "${PK_BIN:=/opt/riscv/riscv32-unknown-elf/bin/pk}"
 : "${OBJCOPY_BIN:=riscv32-unknown-elf-objcopy}"
 
 # Warn if defaults not found; allow harness fallback by unsetting
@@ -208,7 +208,7 @@ export AFL_KEEP_ENV="$AFL_KEEP_ENV AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES"
 # ---------- Pretty banner ----------
 cat <<BANNER
 ==========================================================
-  🧩 AFL++ + RV32 Mutator Fuzzing Session
+  🧩 AFL++ + ISA Mutator Fuzzing Session
 ==========================================================
   Project Root : $PROJECT_ROOT
   Mutator SO   : $MUTATOR_SO

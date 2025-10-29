@@ -1,5 +1,5 @@
 # ==========================================================
-# afl/Makefile — Build modular harness + RV32 custom mutator
+# afl/Makefile — Build modular harness + ISA-aware custom mutator
 # Compatible with run_fuzz.sh launcher
 # ==========================================================
 
@@ -27,8 +27,8 @@ CORPORA_DIR := $(TOP_DIR)/workdir/corpora
 TRACE_DIR   := $(TOP_DIR)/workdir/traces
 
 # Mutator shared object
-MUT_DIR     := $(AFL_DIR)/rv32_mutator
-MUT_SO      := $(MUT_DIR)/librv32_mutator.so
+MUT_DIR     := $(AFL_DIR)/isa_mutator
+MUT_SO      := $(MUT_DIR)/libisa_mutator.so
 
 # Output harness binary
 FUZZ_EXE    := $(AFL_DIR)/afl_$(MODULE)
@@ -77,7 +77,7 @@ verilate:
 # MUTATOR BUILD
 # ==========================================================
 $(MUT_SO):
-	@echo "$(BLUE)[MUTATOR] Building RV32 hybrid mutator...$(RESET)"
+	@echo "$(BLUE)[MUTATOR] Building ISA-aware mutator...$(RESET)"
 	$(MAKE) -C $(MUT_DIR)
 	@echo "$(GREEN)[OK] Built $(MUT_SO)$(RESET)"
 
