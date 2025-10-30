@@ -12,6 +12,6 @@ weights:
   r_m: 50
 
 schemas:
-  isa_name: riscv32_base
-  dir: ./schemas
-  override_file: ""
+  isa: rv32i
+  root: ./schemas
+  map: isa_map.yaml

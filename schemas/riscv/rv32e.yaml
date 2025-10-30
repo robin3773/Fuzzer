@@ -1,0 +1,9 @@
+meta:
+  isa_name: RV32E
+  isa_family: RISC-V
+  description: "RV32E integer base (16-register subset)"
+  extends: rv32i.yaml
+<<: *common_rules
+
+defaults:
+  register_count: 16

@@ -23,77 +23,78 @@ namespace fuzz::mutator {
 ISAMutator::ISAMutator() = default;
 
 void ISAMutator::initFromEnv() {
-  struct ConfigCandidate {
-    std::string path;
-    bool explicit_request = false;
-  };
-
-  std::vector<ConfigCandidate> candidates;
-  candidates.reserve(4u);
-
-  auto add_candidate = [&](const std::string &path, bool is_explicit) {
-    if (path.empty())
-      return;
-    auto same = std::find_if(candidates.begin(), candidates.end(), [&](const ConfigCandidate &c) {
-      return c.path == path;
-    });
-    if (same == candidates.end())
-      candidates.push_back({path, is_explicit});
-  };
-
-  if (!cli_config_path_.empty())
-    add_candidate(cli_config_path_, true);
-
+  std::vector<std::string> applied_configs;
   std::string env_config_path;
   if (const char *cfg_path = std::getenv("MUTATOR_CONFIG"))
     env_config_path = cfg_path;
 
-  if (!env_config_path.empty())
-    add_candidate(env_config_path, true);
-
-  std::string isa_for_config = cfg_.isa_name;
-  if (const char *env_isa = std::getenv("MUTATOR_ISA")) {
-    if (env_isa && *env_isa)
-      isa_for_config = env_isa;
-  }
-
-  add_candidate("afl/isa_mutator/config/" + isa_for_config + ".yaml", false);
-  add_candidate("afl/isa_mutator/config/mutator.default.yaml", false);
-  add_candidate("afl/isa_mutator/config/mutator.yaml", false);
-
-  std::string loaded_config_path;
-  auto tryLoadConfig = [&](const ConfigCandidate &candidate) {
-    if (candidate.path.empty())
+  auto attempt_load = [&](const std::string &path, bool required) {
+    if (path.empty())
       return false;
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    fs::path resolved(path);
+    if (!fs::exists(resolved, ec)) {
+      if (required) {
+        std::fprintf(stderr,
+                     "[mutator] Requested config '%s' not found\n",
+                     path.c_str());
+      }
+      return false;
+    }
     try {
-      if (cfg_.loadFromFile(candidate.path)) {
-        loaded_config_path = candidate.path;
+      if (cfg_.loadFromFile(resolved.string())) {
+        applied_configs.push_back(resolved.string());
         return true;
       }
     } catch (const std::exception &ex) {
       std::fprintf(stderr,
                    "[mutator] Failed to load config '%s': %s\n",
-                   candidate.path.c_str(), ex.what());
+                   resolved.string().c_str(), ex.what());
       return false;
     }
-
-    if (candidate.explicit_request) {
+    if (required) {
       std::fprintf(stderr,
-                   "[mutator] Requested config '%s' not found or empty\n",
-                   candidate.path.c_str());
+                   "[mutator] Config '%s' was empty\n",
+                   resolved.string().c_str());
     }
     return false;
   };
 
-  bool config_loaded = false;
-  for (const auto &candidate : candidates) {
-    if (tryLoadConfig(candidate)) {
-      config_loaded = true;
-      break;
+  auto load_profile_config = [&](const std::string &isa_name) -> bool {
+    if (isa_name.empty())
+      return false;
+    std::string path = "afl/isa_mutator/config/" + isa_name + ".yaml";
+    return attempt_load(path, false);
+  };
+
+  std::string profile_loaded;
+  attempt_load("afl/isa_mutator/config/mutator.default.yaml", false);
+  attempt_load("afl/isa_mutator/config/mutator.yaml", false);
+  if (load_profile_config(cfg_.isa_name))
+    profile_loaded = cfg_.isa_name;
+
+  if (!env_config_path.empty()) {
+    if (attempt_load(env_config_path, true) && cfg_.isa_name != profile_loaded) {
+      if (load_profile_config(cfg_.isa_name))
+        profile_loaded = cfg_.isa_name;
+    }
+  }
+
+  if (!cli_config_path_.empty()) {
+    if (attempt_load(cli_config_path_, true) && cfg_.isa_name != profile_loaded) {
+      if (load_profile_config(cfg_.isa_name))
+        profile_loaded = cfg_.isa_name;
     }
   }
 
   cfg_.applyEnvironment();
+  if (!cfg_.isa_name.empty() && cfg_.isa_name != profile_loaded) {
+    if (load_profile_config(cfg_.isa_name)) {
+      profile_loaded = cfg_.isa_name;
+      cfg_.applyEnvironment();
+    }
+  }
   MutatorDebug::init_from_env();
 
   const char *dump_target = std::getenv("MUTATOR_EFFECTIVE_CONFIG");
@@ -108,23 +109,51 @@ void ISAMutator::initFromEnv() {
     }
   }
 
-  const char *source = config_loaded ? loaded_config_path.c_str() : "<built-in defaults>";
+  std::string config_summary;
+  if (applied_configs.empty()) {
+    config_summary = "<built-in defaults>";
+  } else if (applied_configs.size() == 1) {
+    config_summary = applied_configs.back();
+  } else {
+    config_summary = applied_configs.back() +
+                     " (+" + std::to_string(applied_configs.size() - 1) + " layered)";
+  }
+
   std::fprintf(stderr,
                "[mutator] config: %s (env/CLI overrides applied)\n",
-               source);
+               config_summary.c_str());
 
   std::string schema_root = cfg_.schema_dir.empty() ? "./schemas" : cfg_.schema_dir;
-  try {
-    isa_ = isa::load_isa_config(schema_root, cfg_.isa_name, cfg_.schema_override);
-    if (isa_.instructions.empty())
-      throw std::runtime_error("schema contained no instructions");
-    use_schema_ = true;
-    word_bytes_ = std::max<uint32_t>(1, isa_.base_width / 8);
-  } catch (const std::exception &ex) {
+  if (cfg_.isa_name.empty()) {
     std::fprintf(stderr,
-                 "[mutator] Schema load failed (%s). Falling back to rule mutator.\n",
-                 ex.what());
+                 "[mutator] No ISA specified in configuration; schema mutator disabled.\n");
     use_schema_ = false;
+  } else {
+    isa::SchemaLocator locator;
+    locator.root_dir = schema_root;
+    locator.isa_name = cfg_.isa_name;
+    locator.map_path = cfg_.schema_map;
+    locator.override_path = cfg_.schema_override;
+
+    try {
+      isa_ = isa::load_isa_config(locator);
+      if (isa_.instructions.empty())
+        throw std::runtime_error("schema contained no instructions");
+      use_schema_ = true;
+      word_bytes_ = std::max<uint32_t>(1, isa_.base_width / 8);
+      std::fprintf(stderr,
+                   "[mutator] schema: %s base_width=%u regs=%u formats=%zu instructions=%zu\n",
+                   isa_.isa_name.c_str(),
+                   isa_.base_width,
+                   isa_.register_count,
+                   isa_.formats.size(),
+                   isa_.instructions.size());
+    } catch (const std::exception &ex) {
+      std::fprintf(stderr,
+                   "[mutator] Schema load failed (%s). Falling back to rule mutator.\n",
+                   ex.what());
+      use_schema_ = false;
+    }
   }
 
   if (!use_schema_) {
@@ -301,17 +330,62 @@ uint32_t ISAMutator::randomFieldValue(const std::string &field_name,
 
   uint64_t mask = internal::mask_bits(enc.width);
 
-  if (field_name == "rd" || field_name == "rs1" || field_name == "rs2") {
+  auto uniform_masked = [&](uint64_t width_mask) {
+    if (enc.width >= 32)
+      return Random::rnd32();
+    return static_cast<uint32_t>(Random::range(static_cast<uint32_t>(width_mask) + 1));
+  };
+
+  switch (enc.kind) {
+  case isa::FieldKind::Register:
+  case isa::FieldKind::Floating: {
     uint32_t limit = isa_.register_count ? isa_.register_count : 32;
     if (limit == 0)
       limit = 32;
     uint32_t value = limit > 0 ? Random::range(limit) : 0;
-    if (field_name == "rd" && limit > 1 && value == 0 && Random::chancePct(80))
+    if (isa_.defaults.hints.reg_prefers_zero_one_hot && limit > 1) {
+      if (Random::chancePct(40)) {
+        value = 0;
+      } else {
+        value = 1 + Random::range(limit - 1);
+      }
+    } else if ((field_name == "rd" || field_name == "rd_rs1") && limit > 1 && value == 0 &&
+               Random::chancePct(80)) {
       value = 1 + Random::range(limit - 1);
+    }
     return static_cast<uint32_t>(value & mask);
   }
 
-  if (enc.is_signed && enc.width < 32) {
+  case isa::FieldKind::Immediate: {
+    if (enc.is_signed && enc.width < 32 && enc.width > 0) {
+      int64_t span = 1ll << (enc.width - 1);
+      int64_t low = -span;
+      int64_t high = span - 1;
+      int64_t range = high - low + 1;
+      int64_t pick = range > 0
+                         ? low + static_cast<int64_t>(Random::range(static_cast<uint32_t>(range)))
+                         : 0;
+      if (isa_.defaults.hints.signed_immediates_bias) {
+        if (Random::chancePct(30)) {
+          pick = 0;
+        } else if (Random::chancePct(30)) {
+          pick = Random::chancePct(50) ? 1 : -1;
+        }
+      }
+      return static_cast<uint32_t>(pick) & static_cast<uint32_t>(mask);
+    }
+    return uniform_masked(mask);
+  }
+
+  case isa::FieldKind::Opcode:
+  case isa::FieldKind::Enum:
+  case isa::FieldKind::Predicate:
+  case isa::FieldKind::Memory:
+  default:
+    break;
+  }
+
+  if (enc.is_signed && enc.width < 32 && enc.width > 0) {
     int64_t span = 1ll << (enc.width - 1);
     int64_t low = -span;
     int64_t high = span - 1;
@@ -322,10 +396,7 @@ uint32_t ISAMutator::randomFieldValue(const std::string &field_name,
     return static_cast<uint32_t>(pick) & static_cast<uint32_t>(mask);
   }
 
-  if (enc.width >= 32)
-  return Random::rnd32();
-
-  return static_cast<uint32_t>(Random::range(static_cast<uint32_t>(mask) + 1));
+  return uniform_masked(mask);
 }
 
 void ISAMutator::applyField(uint32_t &word,
@@ -353,11 +424,11 @@ void ISAMutator::writeWord(unsigned char *buf,
                               size_t offset,
                               uint32_t word) const {
   if (word_bytes_ == 2) {
-    isa::put_u16_le(buf, offset, static_cast<uint16_t>(word & 0xFFFFu));
+    internal::store_u16_le(buf, offset, static_cast<uint16_t>(word & 0xFFFFu));
     return;
   }
   if (word_bytes_ == 4) {
-    isa::put_u32_le(buf, offset, word);
+    internal::store_u32_le(buf, offset, word);
     return;
   }
   for (uint32_t i = 0; i < word_bytes_ && i < 4; ++i)

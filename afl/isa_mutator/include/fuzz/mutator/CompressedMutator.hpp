@@ -2,7 +2,6 @@
 
 #include <cstddef>
 
-#include <fuzz/isa/Instruction.hpp>
 #include <fuzz/mutator/MutatorConfig.hpp>
 
 namespace fuzz::mutator {

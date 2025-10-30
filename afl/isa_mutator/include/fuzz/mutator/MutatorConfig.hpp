@@ -24,8 +24,9 @@ struct Config {
   uint32_t r_weight_base_alu = 70;
   uint32_t r_weight_m = 30;
 
-  std::string isa_name = "riscv32_base";
+  std::string isa_name;
   std::string schema_dir;
+  std::string schema_map;
   std::string schema_override;
 
   bool loadFromFile(const std::string &path);

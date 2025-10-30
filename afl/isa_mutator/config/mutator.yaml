@@ -4,14 +4,14 @@ verbose: false
 enable_c: true
 
 probabilities:
-	decode: 60
-	imm_random: 25
+  decode: 60
+  imm_random: 25
 
 weights:
-	r_base_alu: 70
-	r_m: 30
+  r_base_alu: 70
+  r_m: 30
 
 schemas:
-	isa_name: riscv32_base_simple
-	dir: ./schemas
-	override_file: ./schemas/riscv/riscv32_base_simple.yaml
+  isa: rv32imc
+  root: ./schemas
+  map: isa_map.yaml

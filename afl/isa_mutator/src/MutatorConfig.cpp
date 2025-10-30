@@ -130,12 +130,23 @@ void apply_weight_block(const YAML::Node &node, Config &cfg) {
 void apply_schema_block(const YAML::Node &node, Config &cfg) {
   if (!node || !node.IsMap())
     return;
-  if (auto v = node["isa_name"]; v)
-    cfg.isa_name = node_to_string(v);
-  if (auto v = node["dir"]; v)
-    cfg.schema_dir = node_to_string(v);
-  if (auto v = node["override_file"]; v)
-    cfg.schema_override = node_to_string(v);
+
+  auto assign_if_present = [](const YAML::Node &n, const char *key, std::string &out) {
+    if (auto v = n[key]; v)
+      out = node_to_string(v);
+  };
+
+  assign_if_present(node, "isa", cfg.isa_name);
+  assign_if_present(node, "isa_name", cfg.isa_name);
+  assign_if_present(node, "dir", cfg.schema_dir);
+  assign_if_present(node, "root", cfg.schema_dir);
+  assign_if_present(node, "schema_root", cfg.schema_dir);
+  assign_if_present(node, "map", cfg.schema_map);
+  assign_if_present(node, "map_file", cfg.schema_map);
+  assign_if_present(node, "schema_map", cfg.schema_map);
+  assign_if_present(node, "override", cfg.schema_override);
+  assign_if_present(node, "override_file", cfg.schema_override);
+  assign_if_present(node, "schema_override", cfg.schema_override);
 }
 
 } // namespace
@@ -196,6 +207,15 @@ bool Config::loadFromFile(const std::string &path) {
   if (auto node = root["schema_override"]; node)
     schema_override = node_to_string(node);
 
+  if (auto node = root["schema_map"]; node)
+    schema_map = node_to_string(node);
+
+  if (auto node = root["map"]; node)
+    schema_map = node_to_string(node);
+
+  if (auto node = root["schema_root"]; node)
+    schema_dir = node_to_string(node);
+
   return true;
 }
 
@@ -243,6 +263,10 @@ void Config::applyEnvironment() {
   s = std::getenv("MUTATOR_SCHEMAS");
   if (s && *s)
     schema_dir = s;
+
+  s = std::getenv("MUTATOR_SCHEMA_MAP");
+  if (s && *s)
+    schema_map = s;
 }
 
 void Config::dumpToFile(const std::string &path) const {
@@ -281,6 +305,7 @@ void Config::dumpToFile(const std::string &path) const {
   out << YAML::BeginMap;
   out << YAML::Key << "isa_name" << YAML::Value << isa_name;
   out << YAML::Key << "dir" << YAML::Value << schema_dir;
+  out << YAML::Key << "map" << YAML::Value << schema_map;
   out << YAML::Key << "override_file" << YAML::Value << schema_override;
   out << YAML::EndMap;
 

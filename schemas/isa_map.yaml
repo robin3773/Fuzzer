@@ -6,6 +6,8 @@ isa_families:
       includes: [riscv/rv32i.yaml, riscv/rv32m.yaml, riscv/rv32_base.yaml]
     rv32imc:
       includes: [riscv/rv32i.yaml, riscv/rv32m.yaml, riscv/rv32c.yaml, riscv/rv32_base.yaml]
+    rv32e:
+      includes: [riscv/rv32e.yaml]
     rv64i:
       includes: [riscv/rv64_base.yaml]
     rv64im:

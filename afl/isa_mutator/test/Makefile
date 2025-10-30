@@ -14,8 +14,8 @@ TEST_SRC    := mutator_selftest.cpp
 
 # Runtime knobs (now supported)
 SEED    ?= 12345
-REPEAT  ?= 1
-INPUT   ?=
+REPEAT  ?= 5
+INPUT   ?= ../../../seeds/firmware.bin
 OBJDUMP ?= riscv32-unknown-elf-objdump
 
 all: $(TEST_BIN)

@@ -12,6 +12,6 @@ weights:
   r_m: 30
 
 schemas:
-  isa_name: rv32imc
-  dir: ./schemas
-  override_file: ./schemas/riscv/isa_map.yaml
+  isa: rv32imc
+  root: ./schemas
+  map: isa_map.yaml
