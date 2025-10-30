@@ -1,0 +1,17 @@
+# Example profile favouring schema-heavy mutations.
+strategy: HYBRID
+verbose: true
+enable_c: true
+
+probabilities:
+  decode: 90
+  imm_random: 15
+
+weights:
+  r_base_alu: 85
+  r_m: 50
+
+schemas:
+  isa_name: riscv32_base
+  dir: ./schemas
+  override_file: ""

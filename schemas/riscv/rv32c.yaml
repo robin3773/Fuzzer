@@ -1,0 +1,73 @@
+meta:
+  isa_name: RV32C
+  isa_family: RISC-V
+  description: "RV32C compressed extension (simplified)"
+  extends: rv32_base.yaml
+<<: *common_rules
+
+formats:
+  <<: *riscv_c_formats
+
+fields:
+  opcode:
+    width: 2
+    type: opcode
+    segments:
+      - { lsb: 0, width: 2 }
+  funct3:
+    width: 3
+    type: enum
+    segments:
+      - { lsb: 13, width: 3 }
+  rd_rs1:
+    width: 5
+    type: reg
+    segments:
+      - { lsb: 7, width: 5 }
+  rs2:
+    width: 5
+    type: reg
+    segments:
+      - { lsb: 2, width: 5 }
+  imm_c:
+    width: 6
+    type: imm
+    signed: true
+    segments:
+      - { lsb: 2, width: 5, value_lsb: 2 }
+      - { lsb: 12, width: 1, value_lsb: 7 }
+
+instructions:
+
+  C.JR:       { format: C_CR, fixed: { opcode: 0b10, funct4: 0b1000 } }
+  C.JALR:     { format: C_CR, fixed: { opcode: 0b10, funct4: 0b1001 } }
+  C.MV:       { format: C_CR, fixed: { opcode: 0b01, funct4: 0b1000 } }
+  C.ADD:      { format: C_CR, fixed: { opcode: 0b01, funct4: 0b1001 } }
+  C.EBREAK:   { format: C_CR, fixed: { opcode: 0b10, funct4: 0b1001, rd_rs1: 0, rs2: 0 } }
+
+  C.LWSP:     { format: C_CI, fixed: { opcode: 0b10, funct3: 0b010 } }
+  C.LI:       { format: C_CI, fixed: { opcode: 0b01, funct3: 0b010 } }
+  C.LUI:      { format: C_CI, fixed: { opcode: 0b01, funct3: 0b011 } }
+  C.ADDI:     { format: C_CI, fixed: { opcode: 0b01, funct3: 0b000 } }
+  C.ADDI16SP: { format: C_CI, fixed: { opcode: 0b01, funct3: 0b011 } }
+
+  C.SWSP:     { format: C_CSS, fixed: { opcode: 0b10, funct3: 0b110 } }
+
+  C.ADDI4SPN: { format: C_CIW, fixed: { opcode: 0b00, funct3: 0b000 } }
+
+  C.LW:       { format: C_CL,  fixed: { opcode: 0b00, funct3: 0b010 } }
+
+  C.SW:       { format: C_CS,  fixed: { opcode: 0b00, funct3: 0b110 } }
+  C.AND:      { format: C_CS,  fixed: { opcode: 0b01, funct4: 0b1001 } }
+  C.OR:       { format: C_CS,  fixed: { opcode: 0b01, funct4: 0b1101 } }
+  C.XOR:      { format: C_CS,  fixed: { opcode: 0b01, funct4: 0b1011 } }
+  C.SUB:      { format: C_CS,  fixed: { opcode: 0b01, funct4: 0b1000 } }
+
+  C.BEQZ:     { format: C_CB,  fixed: { opcode: 0b01, funct3: 0b110 } }
+  C.BNEZ:     { format: C_CB,  fixed: { opcode: 0b01, funct3: 0b111 } }
+  C.SRLI:     { format: C_CB,  fixed: { opcode: 0b01, funct3: 0b100 } }
+  C.SRAI:     { format: C_CB,  fixed: { opcode: 0b01, funct3: 0b101 } }
+  C.ANDI:     { format: C_CB,  fixed: { opcode: 0b01, funct3: 0b100 } }
+
+  C.J:        { format: C_CJ,  fixed: { opcode: 0b01, funct3: 0b101 } }
+  C.JAL:      { format: C_CJ,  fixed: { opcode: 0b01, funct3: 0b001 } } 

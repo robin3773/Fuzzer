@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <string>
 
 namespace fuzz::mutator {
 
@@ -15,6 +16,8 @@ public:
                                       size_t max_size) = 0;
 
   virtual size_t last_out_len() const = 0;
+
+  virtual void setConfigPath(const std::string &path) { (void)path; }
 };
 
 } // namespace fuzz::mutator

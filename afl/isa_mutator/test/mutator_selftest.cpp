@@ -36,8 +36,88 @@ static constexpr const char* C_GREEN = "\033[1;32m";
 static constexpr const char* C_CYAN  = "\033[1;36m";
 static constexpr const char* C_YEL   = "\033[1;33m";
 static constexpr const char* C_MIDB  = "\033[1;34m";
+static constexpr const char* C_RED   = "\033[1;31m";
 
 // ---------- Helpers ----------
+static inline bool is_space(unsigned char c) { return std::isspace(c) != 0; }
+
+struct DisasmCols {
+  std::string prefix;   // includes offset + ':' and original indentation
+  std::string bytes;    // encoded word / .insn token
+  std::string mnemonic; // assembly mnemonic
+  std::string operands; // remaining operand string (may include comments)
+  std::string raw_rest; // fallback when mnemonic parsing fails
+};
+
+static DisasmCols split_disasm_line(const std::string& line) {
+  DisasmCols cols;
+  if (line.empty()) {
+    cols.prefix = line;
+    return cols;
+  }
+
+  size_t colon = line.find(':');
+  if (colon == std::string::npos) {
+    cols.prefix = line;
+    return cols;
+  }
+
+  size_t prefix_end = colon + 1;
+  cols.prefix = line.substr(0, prefix_end);
+
+  size_t pos = prefix_end;
+  while (pos < line.size() && is_space(static_cast<unsigned char>(line[pos])))
+    ++pos;
+
+  size_t bytes_begin = pos;
+  while (pos < line.size() && !is_space(static_cast<unsigned char>(line[pos])))
+    ++pos;
+  cols.bytes = line.substr(bytes_begin, pos - bytes_begin);
+
+  while (pos < line.size() && is_space(static_cast<unsigned char>(line[pos])))
+    ++pos;
+
+  if (pos < line.size()) {
+    cols.raw_rest = line.substr(pos);
+
+    size_t m_begin = pos;
+    while (pos < line.size() && !is_space(static_cast<unsigned char>(line[pos])))
+      ++pos;
+    cols.mnemonic = line.substr(m_begin, pos - m_begin);
+
+    while (pos < line.size() && is_space(static_cast<unsigned char>(line[pos])))
+      ++pos;
+
+    if (pos < line.size())
+      cols.operands = line.substr(pos);
+  }
+  return cols;
+}
+
+static std::string format_disasm_line(const std::string& line) {
+  auto cols = split_disasm_line(line);
+  // If no colon or nothing beyond prefix, return original line unchanged.
+  if (cols.prefix.empty() || cols.prefix == line)
+    return line;
+
+  std::ostringstream oss;
+  oss << cols.prefix;
+  if (!cols.bytes.empty()) {
+    oss << ' ' << std::left << std::setw(12) << cols.bytes;
+  } else {
+    oss << ' ' << std::setw(12) << ' ';
+  }
+  if (!cols.mnemonic.empty()) {
+    oss << ' ' << std::left << std::setw(8) << cols.mnemonic;
+    if (!cols.operands.empty())
+      oss << ' ' << cols.operands;
+  } else if (!cols.raw_rest.empty()) {
+    oss << ' ' << cols.raw_rest;
+  }
+
+  return oss.str();
+}
+
 static bool file_exists(const std::string& p) {
   struct stat st; return ::stat(p.c_str(), &st) == 0 && S_ISREG(st.st_mode);
 }
@@ -125,15 +205,22 @@ static std::vector<std::string> disasm_with_objdump(const std::string& objdump_p
   return out_lines;
 }
 
-static void print_side_by_side(const std::string& left, const std::string& right, size_t pad = 64) {
-  std::string L = left;
-  std::string R = right;
-  bool changed = (L != R);
-  if (L.size() < pad) L.append(pad - L.size(), ' ');
+static void print_side_by_side(const std::string& left,
+                               const std::string& right,
+                               size_t pad = 64) {
+  std::string L_fmt = format_disasm_line(left);
+  std::string R_fmt = format_disasm_line(right);
+  bool changed = (left != right);
+
+  if (L_fmt.size() < pad)
+    L_fmt.append(pad - L_fmt.size(), ' ');
+
   if (changed) {
-    std::cout << L << " " << C(C_GREEN) << "→  " << R << C(C_RESET) << "\n";
+    std::cout << C(C_RED) << L_fmt << C(C_RESET) << ' '
+              << C(C_RED) << "→ " << C(C_GREEN) << R_fmt << C(C_RESET)
+              << '\n';
   } else {
-    std::cout << L << "   " << R << "\n";
+    std::cout << L_fmt << "   " << R_fmt << '\n';
   }
 }
 
@@ -209,10 +296,11 @@ struct Args {
   std::string objdump = env_or("OBJDUMP", "riscv32-unknown-elf-objdump");
   bool rv64 = false;
   size_t pad = 64;
+  std::string config;
 };
 static void usage(const char* prog) {
   std::cout <<
-    "Usage: " << prog << " [--lib path.so] [--in input.bin] [--seed N] [--repeat N] [--objdump PATH] [--width W]\n"
+    "Usage: " << prog << " [--lib path.so] [--config file.yaml] [--in input.bin] [--seed N] [--repeat N] [--objdump PATH] [--width W]\n"
     "Env:   NO_COLOR=1 disables colors\n"
     "       OBJDUMP=/path/to/riscv32-unknown-elf-objdump (default)\n"
     "       XLEN=32|64 (affects disassembly only)\n";
@@ -222,6 +310,7 @@ static Args parse_args(int argc, char** argv) {
   for (int i = 1; i < argc; ++i) {
     std::string s(argv[i]);
     if (s == "--lib" && i+1 < argc) a.lib = argv[++i];
+    else if (s == "--config" && i+1 < argc) a.config = argv[++i];
     else if (s == "--in" && i+1 < argc) a.in = argv[++i];
     else if (s == "--seed" && i+1 < argc) a.seed = (unsigned)std::strtoul(argv[++i], nullptr, 0);
     else if (s == "--repeat" && i+1 < argc) a.repeat = std::max(1, (int)std::strtol(argv[++i], nullptr, 0));
@@ -291,6 +380,8 @@ int main(int argc, char** argv) {
   auto afl_custom_havoc_fn  = (afl_mut_fn  )dlsym(handle, "afl_custom_havoc_mutation");
   (void)afl_custom_havoc_fn;
   auto afl_custom_deinit_fn = (afl_deinit_fn)dlsym(handle, "afl_custom_deinit");
+  using set_cfg_fn = void (*)(const char *);
+  auto set_config_fn = (set_cfg_fn)dlsym(handle, "mutator_set_config_path");
 
   if (!afl_custom_init_fn || !afl_custom_mutator || !afl_custom_deinit_fn) {
     std::cerr << "[!] Failed to resolve required AFL custom mutator symbols\n"
@@ -301,6 +392,12 @@ int main(int argc, char** argv) {
   }
 
   // Init mutator
+  if (!A.config.empty()) {
+    if (set_config_fn)
+      set_config_fn(A.config.c_str());
+    else
+      std::cerr << "[!] --config ignored: mutator_set_config_path not available\n";
+  }
   afl_custom_init_fn(nullptr);
 
   // Sanity: objdump availability

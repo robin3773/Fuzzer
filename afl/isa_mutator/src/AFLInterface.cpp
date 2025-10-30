@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <ctime>
 #include <mutex>
+#include <string>
 #include <unistd.h>
 
 #include <fuzz/mutator/ISAMutator.hpp>
@@ -14,12 +15,29 @@ namespace mut = fuzz::mutator;
 
 namespace {
 
+std::mutex &cli_mutex() {
+  static std::mutex m;
+  return m;
+}
+
+std::string &cli_config_path() {
+  static std::string path;
+  return path;
+}
+
 mut::MutatorInterface &get_mutator() {
   static mut::MutatorInterface *global = nullptr;
   static std::once_flag once;
 
   std::call_once(once, []() {
     auto *schema = new mut::ISAMutator();
+    std::string snapshot;
+    {
+      std::lock_guard<std::mutex> lock(cli_mutex());
+      snapshot = cli_config_path();
+    }
+    if (!snapshot.empty())
+      schema->setConfigPath(snapshot);
     schema->initFromEnv();
     global = schema;
   });
@@ -30,6 +48,11 @@ mut::MutatorInterface &get_mutator() {
 } // namespace
 
 extern "C" {
+
+void mutator_set_config_path(const char *path) {
+  std::lock_guard<std::mutex> lock(cli_mutex());
+  cli_config_path() = path ? std::string(path) : std::string();
+}
 
 int afl_custom_init(void * /*afl*/) {
   (void)get_mutator();

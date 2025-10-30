@@ -1,0 +1,30 @@
+meta:
+  isa_name: RV32M
+  isa_family: RISC-V
+  description: "RV32M multiply/divide extension"
+  extends: rv32_base.yaml
+<<: *common_rules
+
+# M extension uses R-format; new funct7 patterns denote M ops
+formats:
+  <<: *riscv_formats
+
+fields:
+  # reuse fields from base; only override/add if necessary
+  # (loader merge will respect per-ISA 'fields' keys)
+  funct7:
+    width: 7
+    type: enum
+    segments:
+      - { lsb: 25, width: 7 }
+
+instructions:
+  # Inherit all RV32I then add M ext
+  MUL:    {format: R, opcode: 0b0110011, funct3: 0b000, funct7: 0b0000001}
+  MULH:   {format: R, opcode: 0b0110011, funct3: 0b001, funct7: 0b0000001}
+  MULSU:  {format: R, opcode: 0b0110011, funct3: 0b010, funct7: 0b0000001}
+  MULU:   {format: R, opcode: 0b0110011, funct3: 0b011, funct7: 0b0000001}
+  DIV:    {format: R, opcode: 0b0110011, funct3: 0b100, funct7: 0b0000001}
+  DIVU:   {format: R, opcode: 0b0110011, funct3: 0b101, funct7: 0b0000001}
+  REM:    {format: R, opcode: 0b0110011, funct3: 0b110, funct7: 0b0000001}
+  REMU:   {format: R, opcode: 0b0110011, funct3: 0b111, funct7: 0b0000001}

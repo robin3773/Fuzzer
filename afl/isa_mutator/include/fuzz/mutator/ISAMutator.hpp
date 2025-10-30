@@ -15,6 +15,7 @@ class ISAMutator : public MutatorInterface {
 public:
   ISAMutator();
   void initFromEnv() override;
+  void setConfigPath(const std::string &path) override { cli_config_path_ = path; }
 
   unsigned char *mutateStream(unsigned char *in, size_t in_len,
                               unsigned char *out_buf,
@@ -28,6 +29,7 @@ public:
 private:
   Config cfg_;
   isa::ISAConfig isa_;
+  std::string cli_config_path_;
   bool use_schema_ = false;
   size_t last_len_ = 0;
   uint32_t word_bytes_ = 4;

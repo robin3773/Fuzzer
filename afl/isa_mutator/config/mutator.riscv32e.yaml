@@ -1,0 +1,17 @@
+# Sample profile targeting the RV32E ISA subset.
+strategy: IR
+verbose: false
+enable_c: false
+
+probabilities:
+  decode: 55
+  imm_random: 35
+
+weights:
+  r_base_alu: 75
+  r_m: 0
+
+schemas:
+  isa_name: riscv32e
+  dir: ./schemas
+  override_file: ""

@@ -22,6 +22,9 @@ endif
 # Compiler flags
 CXXFLAGS := -std=c++17 -fPIC -Wall -Wextra -Wno-unused-parameter -Iinclude -O2
 
+MUTATOR_CONFIG ?= $(abspath config/mutator.default.yaml)
+export MUTATOR_CONFIG
+
 # yaml-cpp detection (pkg-config preferred)
 YAML_CFLAGS  ?= $(shell pkg-config --cflags yaml-cpp 2>/dev/null)
 YAML_LIBS    ?= $(shell pkg-config --libs yaml-cpp 2>/dev/null)
@@ -40,6 +43,7 @@ TARGET    = libisa_mutator.so
 
 SOURCES = \
   $(SRC_DIR)/Random.cpp \
+  $(SRC_DIR)/MutatorConfig.cpp \
   $(SRC_DIR)/isa_loader.cpp \
   $(SRC_DIR)/AFLInterface.cpp \
   $(SRC_DIR)/ISAMutator.cpp \

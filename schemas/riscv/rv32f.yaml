@@ -1,0 +1,42 @@
+meta:
+  isa_name: RV32F
+  isa_family: RISC-V
+  description: "RV32F single-precision floating-point extension"
+  extends: rv32_base.yaml
+<<: *common_rules
+
+formats:
+  <<: *riscv_f_formats
+
+fields:
+  # FP fields use same rd/rs1/rs2 bit positions but represent FP registers
+  # Optionally, mark them as type: freg to allow mutator to bias differently
+  rd:
+    width: 5
+    type: freg
+    segments:
+      - { lsb: 7, width: 5 }
+  rs1:
+    width: 5
+    type: freg
+    segments:
+      - { lsb: 15, width: 5 }
+  rs2:
+    width: 5
+    type: freg
+    segments:
+      - { lsb: 20, width: 5 }
+
+instructions:
+  FLW:    { format: I, fixed: { opcode: 0b0000111, funct3: 0b010 } }
+  FSW:    { format: S, fixed: { opcode: 0b0100111, funct3: 0b010 } }
+  FADD_S: { format: FR, fixed: { opcode: 0b1010011, funct7: 0b0000000 } }
+  FSUB_S: { format: FR, fixed: { opcode: 0b1010011, funct7: 0b0000100 } }
+  FMUL_S: { format: FR, fixed: { opcode: 0b1010011, funct7: 0b0001000 } }
+  FDIV_S: { format: FR, fixed: { opcode: 0b1010011, funct7: 0b0001100 } }
+
+
+
+#
+#TASK - Not Complete Have to Review Later
+#

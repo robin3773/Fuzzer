@@ -114,52 +114,173 @@ YAML::Node load_with_includes(const fs::path &path, std::set<fs::path> &stack) {
   return result;
 }
 
-FieldEncoding parse_field(const std::string &name, const YAML::Node &node) {
-  FieldEncoding enc;
-  enc.name = name;
-  if (node["signed"])
-    enc.is_signed = node["signed"].as<bool>();
-
-  uint32_t width_from_segments = 0;
-  uint32_t running_offset = 0;
-  if (node["segments"]) {
-    const YAML::Node &segments = node["segments"];
-    if (!segments.IsSequence())
-      throw std::runtime_error("Field '" + name + "' segments must be a sequence");
-    for (auto segNode : segments) {
-      FieldSegment seg;
-      seg.word_lsb = segNode["lsb"].as<uint32_t>();
-      seg.width = segNode["width"].as<uint32_t>();
-      if (segNode["value_lsb"]) {
-        seg.value_lsb = segNode["value_lsb"].as<uint32_t>();
-      } else {
-        seg.value_lsb = running_offset;
-      }
-      running_offset = seg.value_lsb + seg.width;
-      width_from_segments += seg.width;
-      enc.segments.push_back(seg);
-    }
+uint32_t compute_field_width(const std::vector<FieldSegment> &segments) {
+  uint32_t width = 0;
+  for (const auto &segment : segments) {
+    uint32_t extent = segment.value_lsb + segment.width;
+    if (extent > width)
+      width = extent;
   }
-  if (node["width"])
-    enc.width = node["width"].as<uint32_t>();
-  else
-    enc.width = width_from_segments;
-
-  return enc;
+  return width;
 }
 
-FormatSpec parse_format(const std::string &name, const YAML::Node &node) {
+FieldSegment parse_segment(const YAML::Node &node, uint32_t default_value_lsb) {
+  FieldSegment segment;
+  segment.value_lsb = default_value_lsb;
+
+  if (node.IsSequence()) {
+    if (node.size() != 2)
+      throw std::runtime_error("Segment sequence must contain [lsb, msb]");
+    segment.word_lsb = node[0].as<uint32_t>();
+    uint32_t msb = node[1].as<uint32_t>();
+    if (msb < segment.word_lsb)
+      throw std::runtime_error("Segment msb < lsb");
+    segment.width = msb - segment.word_lsb + 1;
+    return segment;
+  }
+
+  if (!node.IsMap())
+    throw std::runtime_error("Unexpected segment node type");
+
+  if (node["value_lsb"])
+    segment.value_lsb = node["value_lsb"].as<uint32_t>();
+  if (node["lsb"]) {
+    segment.word_lsb = node["lsb"].as<uint32_t>();
+  }
+  if (node["width"]) {
+    segment.width = node["width"].as<uint32_t>();
+  }
+
+  if (node["bits"]) {
+    const YAML::Node &bits = node["bits"];
+    if (!bits.IsSequence() || bits.size() != 2)
+      throw std::runtime_error("Segment bits must contain [lsb, msb]");
+    segment.word_lsb = bits[0].as<uint32_t>();
+    uint32_t msb = bits[1].as<uint32_t>();
+    if (msb < segment.word_lsb)
+      throw std::runtime_error("Segment msb < lsb");
+    segment.width = msb - segment.word_lsb + 1;
+  }
+
+  if (!segment.width)
+    throw std::runtime_error("Segment missing width definition");
+
+  return segment;
+}
+
+FieldEncoding parse_field(const std::string &name, const YAML::Node &node) {
+  FieldEncoding encoding;
+  encoding.name = name;
+  if (node["signed"])
+    encoding.is_signed = node["signed"].as<bool>();
+  if (node["width"])
+    encoding.width = node["width"].as<uint32_t>();
+
+  auto append_segments = [&](const YAML::Node &source) {
+    if (!source.IsSequence())
+      throw std::runtime_error("Field '" + name + "' segments must be a sequence");
+    uint32_t next_value_lsb = 0;
+    if (!encoding.segments.empty())
+      next_value_lsb = encoding.segments.back().value_lsb + encoding.segments.back().width;
+    for (auto entry : source) {
+      FieldSegment seg = parse_segment(entry, next_value_lsb);
+      next_value_lsb = seg.value_lsb + seg.width;
+      encoding.segments.push_back(seg);
+    }
+  };
+
+  if (node["segments"]) {
+    append_segments(node["segments"]);
+  } else if (node["bits"]) {
+    const YAML::Node &bits = node["bits"];
+    if (bits.IsSequence() && bits.size() == 2 && bits[0].IsScalar()) {
+      FieldSegment seg = parse_segment(bits, 0);
+      if (node["value_lsb"]) seg.value_lsb = node["value_lsb"].as<uint32_t>();
+      encoding.segments.push_back(seg);
+    } else {
+      append_segments(bits);
+    }
+  } else if (node["lsb"] && node["width"]) {
+    FieldSegment seg;
+    seg.word_lsb = node["lsb"].as<uint32_t>();
+    seg.width = node["width"].as<uint32_t>();
+    if (node["value_lsb"])
+      seg.value_lsb = node["value_lsb"].as<uint32_t>();
+    encoding.segments.push_back(seg);
+  }
+
+  if (!encoding.segments.empty() && !encoding.width)
+    encoding.width = compute_field_width(encoding.segments);
+
+  if (encoding.segments.empty() && encoding.width == 0)
+    throw std::runtime_error("Field '" + name + "' missing width/segments definition");
+
+  return encoding;
+}
+
+bool segments_equal(const std::vector<FieldSegment> &lhs,
+                    const std::vector<FieldSegment> &rhs) {
+  if (lhs.size() != rhs.size())
+    return false;
+  for (size_t i = 0; i < lhs.size(); ++i) {
+    if (lhs[i].word_lsb != rhs[i].word_lsb)
+      return false;
+    if (lhs[i].width != rhs[i].width)
+      return false;
+    if (lhs[i].value_lsb != rhs[i].value_lsb)
+      return false;
+  }
+  return true;
+}
+
+void ensure_field(std::unordered_map<std::string, FieldEncoding> &fields,
+                  const FieldEncoding &candidate) {
+  auto [it, inserted] = fields.emplace(candidate.name, candidate);
+  if (inserted)
+    return;
+
+  FieldEncoding &existing = it->second;
+  if (existing.segments.empty() && !candidate.segments.empty()) {
+    existing.segments = candidate.segments;
+  }
+  if (existing.width == 0)
+    existing.width = candidate.width;
+  if (candidate.is_signed)
+    existing.is_signed = true;
+
+  if (!candidate.segments.empty() && !segments_equal(existing.segments, candidate.segments))
+    throw std::runtime_error("Conflicting definition for field '" + candidate.name + "'");
+}
+
+FormatSpec parse_format(const std::string &name,
+                        const YAML::Node &node,
+                        std::unordered_map<std::string, FieldEncoding> &fields) {
   FormatSpec fmt;
   fmt.name = name;
   if (node["width"])
     fmt.width = node["width"].as<uint32_t>();
-  if (node["fields"]) {
-    const YAML::Node &fields = node["fields"];
-    if (!fields.IsSequence())
-      throw std::runtime_error("Format '" + name + "' fields must be a sequence");
-    for (auto f : fields)
-      fmt.fields.emplace_back(f.as<std::string>());
+  if (!node["fields"])
+    throw std::runtime_error("Format '" + name + "' missing fields");
+
+  const YAML::Node &field_list = node["fields"];
+  if (!field_list.IsSequence())
+    throw std::runtime_error("Format '" + name + "' fields must be a sequence");
+
+  for (auto entry : field_list) {
+    if (entry.IsScalar()) {
+      fmt.fields.emplace_back(entry.as<std::string>());
+      continue;
+    }
+    if (!entry.IsMap())
+      throw std::runtime_error("Format '" + name + "' has invalid field entry");
+    if (!entry["name"])
+      throw std::runtime_error("Inline field definition missing name in format '" + name + "'");
+    std::string field_name = entry["name"].as<std::string>();
+    fmt.fields.emplace_back(field_name);
+    FieldEncoding derived = parse_field(field_name, entry);
+    ensure_field(fields, derived);
   }
+
   return fmt;
 }
 
@@ -229,7 +350,7 @@ ISAConfig load_isa_config(const std::string &root_dir,
   if (root["formats"]) {
     for (auto it = root["formats"].begin(); it != root["formats"].end(); ++it) {
       std::string name = it->first.as<std::string>();
-      isa.formats[name] = parse_format(name, it->second);
+      isa.formats[name] = parse_format(name, it->second, isa.fields);
       if (isa.formats[name].width == 0)
         isa.formats[name].width = isa.base_width;
     }

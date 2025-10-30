@@ -1,20 +1,15 @@
-# ============================================================
-# isa_map.yaml — defines how ISAs and extensions compose
-# ============================================================
 isa_families:
   riscv:
     rv32i:
-      includes: [riscv/riscv32_base.yaml]
+      includes: [riscv/rv32i.yaml, riscv/rv32_base.yaml]
     rv32im:
-      includes: [riscv/riscv32_base.yaml, riscv/riscv32m.yaml]
+      includes: [riscv/rv32i.yaml, riscv/rv32m.yaml, riscv/rv32_base.yaml]
     rv32imc:
-      includes: [riscv/riscv32_base.yaml, riscv/riscv32m.yaml, riscv/riscv32c.yaml]
+      includes: [riscv/rv32i.yaml, riscv/rv32m.yaml, riscv/rv32c.yaml, riscv/rv32_base.yaml]
     rv64i:
-      includes: [riscv/riscv64_base.yaml]
+      includes: [riscv/rv64_base.yaml]
     rv64im:
-      includes: [riscv/riscv64_base.yaml, riscv/riscv64m.yaml]
-    rv64gc:
-      includes: [riscv/riscv64m.yaml, riscv/riscv64gc.yaml]
+      includes: [riscv/rv64_base.yaml, riscv/rv64m.yaml]
 
   arm:
     armv8a:

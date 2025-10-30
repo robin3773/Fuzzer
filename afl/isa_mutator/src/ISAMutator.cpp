@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
@@ -22,8 +23,95 @@ namespace fuzz::mutator {
 ISAMutator::ISAMutator() = default;
 
 void ISAMutator::initFromEnv() {
-  cfg_.initFromEnv();
+  struct ConfigCandidate {
+    std::string path;
+    bool explicit_request = false;
+  };
+
+  std::vector<ConfigCandidate> candidates;
+  candidates.reserve(4u);
+
+  auto add_candidate = [&](const std::string &path, bool is_explicit) {
+    if (path.empty())
+      return;
+    auto same = std::find_if(candidates.begin(), candidates.end(), [&](const ConfigCandidate &c) {
+      return c.path == path;
+    });
+    if (same == candidates.end())
+      candidates.push_back({path, is_explicit});
+  };
+
+  if (!cli_config_path_.empty())
+    add_candidate(cli_config_path_, true);
+
+  std::string env_config_path;
+  if (const char *cfg_path = std::getenv("MUTATOR_CONFIG"))
+    env_config_path = cfg_path;
+
+  if (!env_config_path.empty())
+    add_candidate(env_config_path, true);
+
+  std::string isa_for_config = cfg_.isa_name;
+  if (const char *env_isa = std::getenv("MUTATOR_ISA")) {
+    if (env_isa && *env_isa)
+      isa_for_config = env_isa;
+  }
+
+  add_candidate("afl/isa_mutator/config/" + isa_for_config + ".yaml", false);
+  add_candidate("afl/isa_mutator/config/mutator.default.yaml", false);
+  add_candidate("afl/isa_mutator/config/mutator.yaml", false);
+
+  std::string loaded_config_path;
+  auto tryLoadConfig = [&](const ConfigCandidate &candidate) {
+    if (candidate.path.empty())
+      return false;
+    try {
+      if (cfg_.loadFromFile(candidate.path)) {
+        loaded_config_path = candidate.path;
+        return true;
+      }
+    } catch (const std::exception &ex) {
+      std::fprintf(stderr,
+                   "[mutator] Failed to load config '%s': %s\n",
+                   candidate.path.c_str(), ex.what());
+      return false;
+    }
+
+    if (candidate.explicit_request) {
+      std::fprintf(stderr,
+                   "[mutator] Requested config '%s' not found or empty\n",
+                   candidate.path.c_str());
+    }
+    return false;
+  };
+
+  bool config_loaded = false;
+  for (const auto &candidate : candidates) {
+    if (tryLoadConfig(candidate)) {
+      config_loaded = true;
+      break;
+    }
+  }
+
+  cfg_.applyEnvironment();
   MutatorDebug::init_from_env();
+
+  const char *dump_target = std::getenv("MUTATOR_EFFECTIVE_CONFIG");
+  if (dump_target && *dump_target) {
+    try {
+      cfg_.dumpToFile(dump_target);
+    } catch (const std::exception &ex) {
+      std::fprintf(stderr,
+                   "[mutator] Failed to dump effective config to %s: %s\n",
+                   dump_target,
+                   ex.what());
+    }
+  }
+
+  const char *source = config_loaded ? loaded_config_path.c_str() : "<built-in defaults>";
+  std::fprintf(stderr,
+               "[mutator] config: %s (env/CLI overrides applied)\n",
+               source);
 
   std::string schema_root = cfg_.schema_dir.empty() ? "./schemas" : cfg_.schema_dir;
   try {

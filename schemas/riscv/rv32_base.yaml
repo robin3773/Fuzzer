@@ -1,0 +1,219 @@
+# ============================================================
+# rv32_base.yaml — universal defaults + RISC-V format templates
+# (no instructions here; per-ISA files must define `fields:` and `instructions:`)
+# ============================================================
+
+meta:
+  version: 1
+  isa_family: RISC-V
+  isa_name: RV32_BASE_TEMPLATES
+  description: "Shared defaults and canonical RV32 32b/16b format templates for composition"
+
+# ------------------------------------------------------------
+# Shared defaults and generic mutation guidance (optional)
+# ------------------------------------------------------------
+defaults: &defaults
+  endianness: little
+  register_count: 32
+  default_pc: 0x80000000
+  mutation_hints:
+    reg_prefers_zero_one_hot: true
+    signed_immediates_bias: true
+    align_load_store: 4
+
+# ------------------------------------------------------------
+# Canonical 32-bit instruction format templates (LSB0 numbering)
+# NOTE: These name only the ordered bit fields; actual field
+# widths/signedness come from per-ISA `fields:` files.
+# ------------------------------------------------------------
+riscv_formats: &riscv_formats
+  R:
+    width: 32
+    fields:
+      - { name: opcode, bits: [0, 6],   width: 7 }
+      - { name: rd,     bits: [7, 11],  width: 5 }
+      - { name: funct3, bits: [12, 14], width: 3 }
+      - { name: rs1,    bits: [15, 19], width: 5 }
+      - { name: rs2,    bits: [20, 24], width: 5 }
+      - { name: funct7, bits: [25, 31], width: 7 }
+
+  I:
+    width: 32
+    fields:
+      - { name: opcode, bits: [0, 6],   width: 7 }
+      - { name: rd,     bits: [7, 11],  width: 5 }
+      - { name: funct3, bits: [12, 14], width: 3 }
+      - { name: rs1,    bits: [15, 19], width: 5 }
+      - { name: imm0,    bits: [20, 31], width: 12 }   # per-ISA marks signedness
+
+  S:
+    width: 32
+    fields:
+      - { name: opcode, bits: [0, 6],   width: 7 }
+      - { name: imm0,   bits: [7, 11],  width: 5 }
+      - { name: funct3, bits: [12, 14], width: 3 }
+      - { name: rs1,    bits: [15, 19], width: 5 }
+      - { name: rs2,    bits: [20, 24], width: 5 }
+      - { name: imm1,   bits: [25, 31], width: 7 }
+
+  B:
+    width: 32
+    fields:
+      - { name: opcode, bits: [0, 6],   width: 7 }
+      - { name: imm0,   bits: [7, 7],   width: 1 }     # imm[11]
+      - { name: imm1,   bits: [8, 11],  width: 4 }    # imm[4:1]
+      - { name: funct3, bits: [12, 14], width: 3 }
+      - { name: rs1,    bits: [15, 19], width: 5 }
+      - { name: rs2,    bits: [20, 24], width: 5 }
+      - { name: imm2,   bits: [25, 30], width: 6 }   # imm[10:5]
+      - { name: imm3,   bits: [31, 31], width: 1 }   # imm[12]
+
+  U:
+    width: 32
+    fields:
+      - { name: opcode, bits: [0, 6],   width: 7 }
+      - { name: rd,     bits: [7, 11],  width: 5 }
+      - { name: imm0,    bits: [12, 31], width: 20 }
+
+  J:
+    width: 32
+    fields:
+      - { name: opcode, bits: [0, 6],   width: 7 }
+      - { name: rd,     bits: [7, 11],  width: 5 }
+      - { name: imm0,    bits: [12, 31], width: 20 }   # split per-ISA via value_lsb if desired
+
+# ------------------------------------------------------------
+# Compressed 16-bit format templates
+# ------------------------------------------------------------
+riscv_c_formats: &riscv_c_formats
+
+  C_CR:
+    width: 16
+    fields:
+      - { name: opcode, bits: [0, 1],   width: 2 }
+      - { name: rs2,    bits: [2, 6],   width: 5 }
+      - { name: rd_rs1, bits: [7, 11],  width: 5 }
+      - { name: funct4, bits: [12, 15], width: 4 }
+  C_CI:
+    width: 16
+    fields:
+      - { name: opcode, bits: [0, 1],   width: 2 }
+      - { name: imm0,   bits: [2, 6],   width: 5 }     # per-ISA may mark signed
+      - { name: rd_rs1, bits: [7, 11],  width: 5 }
+      - { name: imm1,   bits: [12, 12], width: 1 }
+      - { name: funct3, bits: [13, 15], width: 3 }
+  C_CSS:
+    width: 16
+    fields:
+      - { name: opcode, bits: [0, 1],   width: 2 }
+      - { name: rs2,    bits: [2, 6],   width: 5 }
+      - { name: imm0,    bits: [7, 12],  width: 6 }     # per-ISA may mark signed
+      - { name: funct3, bits: [13, 15], width: 3 }
+  C_CIW:
+    width: 16
+    fields:
+      - { name: opcode, bits: [0, 1],   width: 2 }
+      - { name: rd,     bits: [2, 4],   width: 5 }     # per-ISA may mark signed
+      - { name: imm0,   bits: [5, 12],  width: 8 }
+      - { name: funct3, bits: [13, 15], width: 3 }
+  C_CL:
+    width: 16
+    fields:
+      - { name: opcode, bits: [0, 1],   width: 2 }
+      - { name: rd,     bits: [2, 4],   width: 3 }
+      - { name: imm0,   bits: [5, 6],   width: 2 }     # per-ISA may mark signed
+      - { name: rs1,    bits: [7, 9],   width: 5 }
+      - { name: imm1,   bits: [10, 12], width: 3 }
+      - { name: funct3, bits: [13, 15], width: 3 }
+    C_CS:
+    width: 16
+    fields:
+      - { name: opcode, bits: [0, 1],   width: 2 }
+      - { name: rs1,    bits: [2, 4],   width: 3 }
+      - { name: imm0,   bits: [5, 6],   width: 2 }     # per-ISA may mark signed
+      - { name: rd_rs1, bits: [7, 9],   width: 5 }
+      - { name: imm1,   bits: [10, 12], width: 3 }
+      - { name: funct3, bits: [13, 15], width: 3 }
+  C_CB:
+    width: 16
+    fields:
+      - { name: opcode, bits: [0, 1],   width: 2 }
+      - { name: imm0,   bits: [2, 6],   width: 2 }     # per-ISA may mark signed
+      - { name: rs1,    bits: [7, 9],   width: 5 }
+      - { name: imm1,   bits: [10, 12], width: 3 }     # per-ISA may mark signed
+      - { name: funct3, bits: [13, 15], width: 3 }
+  C_CJ:
+    width: 16
+    fields:
+      - { name: opcode, bits: [0, 1],   width: 2 }
+      - { name: offset, bits: [2, 12],  width: 11 }
+      - { name: funct3, bits: [13, 15], width: 3 }
+# ------------------------------------------------------------
+# Atomic and FP template variants (if extensions are included)
+# These are format shells; concrete field properties live in per-ext files.
+# ------------------------------------------------------------
+riscv_a_formats: &riscv_a_formats
+  A:
+    width: 32
+    fields:
+      - { name: opcode, bits: [0, 6],   width: 7 }
+      - { name: rd,     bits: [7, 11],  width: 5 }
+      - { name: funct3, bits: [12, 14], width: 3 }
+      - { name: rs1,    bits: [15, 19], width: 5 }
+      - { name: rs2,    bits: [20, 24], width: 5 }
+      - { name: aq_rl,  bits: [25, 26], width: 2 }
+      - { name: funct5, bits: [27, 31], width: 5 }
+
+riscv_f_formats: &riscv_f_formats
+  FR:
+    width: 32
+    fields:
+      - { name: opcode, bits: [0, 6],   width: 7 }
+      - { name: rd,     bits: [7, 11],  width: 5 }
+      - { name: funct3, bits: [12, 14], width: 3 }
+      - { name: rs1,    bits: [15, 19], width: 5 }
+      - { name: rs2,    bits: [20, 24], width: 5 }
+      - { name: funct7, bits: [25, 31], width: 7 }
+
+  FI:
+    width: 32
+    fields:
+      - { name: opcode, bits: [0, 6],   width: 7 }
+      - { name: rd,     bits: [7, 11],  width: 5 }
+      - { name: rs1,    bits: [15, 19], width: 5 }
+      - { name: imm,    bits: [20, 31], width: 12 }
+
+# ------------------------------------------------------------
+# Exported formats mapping for consumers that want a flat map
+# Per-ISA files can do:
+#   formats:
+#     <<: *riscv_formats
+#     <<: *riscv_c_formats
+#     <<: *riscv_a_formats
+#     <<: *riscv_f_formats
+# ------------------------------------------------------------
+formats:
+  {}
+
+# ------------------------------------------------------------
+# Common comparison / oracle rules shared by ISAs
+# (Per-ISA can override via `<<: *common_rules` then modify)
+# ------------------------------------------------------------
+common_rules: &common_rules
+  <<: *defaults
+  compare_oracle:
+    regs: true
+    fp_regs: true
+    pc: true
+    memory_touchset_hash: true
+    csrs_whitelist: []
+    csrs_blacklist: [mcycle, minstret]
+
+# ------------------------------------------------------------
+# Validation policy the loader can enforce
+# ------------------------------------------------------------
+validation:
+  required_sections: [ meta ]
+  recommended_sections: [ formats ]
+  max_field_width: 64
+  strict_mode: true

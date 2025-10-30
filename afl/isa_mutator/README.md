@@ -8,10 +8,11 @@ This directory contains the schema-aware custom mutator that AFL++ loads via `af
 ### Top-level
 - `Makefile` — builds `libisa_mutator.so` for AFL++.
 - `build/` — object files and intermediate artifacts.
+- `config/` — default YAML configuration consumed at runtime.
 
 ### include/
 - `fuzz/mutator/ISAMutator.hpp` — schema-driven mutator entry point.
-- `fuzz/mutator/MutatorConfig.hpp` — runtime knobs sourced from environment variables.
+- `fuzz/mutator/MutatorConfig.hpp` — runtime knobs sourced from config file + environment.
 - `fuzz/mutator/Random.hpp` — xorshift-based RNG shared by mutator components.
 - `fuzz/mutator/LegalCheck.hpp` — structural checks against ISA constraints.
 - `fuzz/mutator/MutatorInterface.hpp` — AFL-facing wrapper helpers.
@@ -54,3 +55,11 @@ afl-fuzz -i afl/seeds -o afl/corpora -- ./afl/afl_picorv32 @@
 - `MUTATOR_ISA` / `MUTATOR_SCHEMAS` / `MUTATOR_SCHEMA` = control schema selection
 
 The remaining RV32-specific environment variables are accepted for backward compatibility while the schema pipeline matures.
+
+## Configuration file
+- Default config lives at `afl/isa_mutator/config/mutator.default.yaml` and mirrors the legacy in-code defaults (legacy `mutator.yaml` is still accepted).
+- Resolution order: CLI `--config <path>` → `MUTATOR_CONFIG` env → per-ISA config (`afl/isa_mutator/config/<isa>.yaml`) → `mutator.default.yaml` → built-in defaults.
+- The self-test harness forwards `--config` into the shared object via `mutator_set_config_path` before `afl_custom_init` runs.
+- Set `MUTATOR_EFFECTIVE_CONFIG=/path/out.yaml` to capture the post-override configuration emitted at startup; the mutator will ensure the parent directory exists.
+- Environment variables listed above still win over file-supplied values, enabling per-run tweaks without editing YAML.
+- Sample profiles: `mutator.aggressive.yaml`, `mutator.riscv32e.yaml` (extend by dropping more files under `config/`).
