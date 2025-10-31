@@ -354,15 +354,8 @@ mutate_once(afl_mut_fn afl_custom_mutator,
 int main(int argc, char** argv) {
   if (std::getenv("NO_COLOR")) g_color = false;
   Args A = parse_args(argc, argv);
-  std::string strategy = get_strategy();
 
   std::cout << C(C_CYAN) << "[*] Mutator self-test using system disassembler\n" << C(C_RESET);
-  std::cout << "    lib:     " << A.lib << "\n"
-            << "    objdump: " << A.objdump << "\n"
-            << "    seed:    " << A.seed << "\n"
-            << "    repeat:  " << A.repeat << "\n"
-            << "    strategy:" << strategy << "\n"
-            << "    XLEN:    " << (A.rv64 ? "64" : "32") << "\n";
 
   if (!file_exists(A.lib)) {
     std::cerr << C(C_YEL) << "[!] Library not found: " << A.lib << C(C_RESET) << "\n";
@@ -382,6 +375,8 @@ int main(int argc, char** argv) {
   auto afl_custom_deinit_fn = (afl_deinit_fn)dlsym(handle, "afl_custom_deinit");
   using set_cfg_fn = void (*)(const char *);
   auto set_config_fn = (set_cfg_fn)dlsym(handle, "mutator_set_config_path");
+  using get_strategy_fn_t = const char *(*)();
+  auto get_strategy_sym = (get_strategy_fn_t)dlsym(handle, "mutator_get_active_strategy");
 
   if (!afl_custom_init_fn || !afl_custom_mutator || !afl_custom_deinit_fn) {
     std::cerr << "[!] Failed to resolve required AFL custom mutator symbols\n"
@@ -399,6 +394,19 @@ int main(int argc, char** argv) {
       std::cerr << "[!] --config ignored: mutator_set_config_path not available\n";
   }
   afl_custom_init_fn(nullptr);
+
+  std::string strategy = get_strategy();
+  if (get_strategy_sym) {
+    if (const char *detected = get_strategy_sym())
+      strategy = detected;
+  }
+
+  std::cout << "    lib:     " << A.lib << "\n"
+            << "    objdump: " << A.objdump << "\n"
+            << "    seed:    " << A.seed << "\n"
+            << "    repeat:  " << A.repeat << "\n"
+            << "    strategy:" << strategy << "\n"
+            << "    XLEN:    " << (A.rv64 ? "64" : "32") << "\n";
 
   // Sanity: objdump availability
   {

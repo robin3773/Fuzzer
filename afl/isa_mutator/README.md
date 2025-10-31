@@ -17,11 +17,11 @@ This directory contains the schema-aware custom mutator that AFL++ loads via `af
 - `fuzz/mutator/LegalCheck.hpp` — structural checks against ISA constraints.
 - `fuzz/mutator/MutatorInterface.hpp` — AFL-facing wrapper helpers.
 - `fuzz/mutator/MutatorDebug.hpp` — opt-in logging utilities.
-- `fuzz/isa/Loader.hpp` — YAML loader for ISA schema files.
+- `fuzz/isa/IsaLoader.hpp` — YAML loader for ISA schema files.
 
 ### src/
 - `ISAMutator.cpp` — implementation of the schema-driven mutation pipeline.
-- `isa_loader.cpp` — YAML parsing and `ISAConfig` construction.
+- `IsaLoader.cpp` — YAML parsing and `ISAConfig` construction.
 - `AFLInterface.cpp` — hooks exported to AFL++ (`afl_custom_*` symbols).
 - `Random.cpp`, `LegalCheck.cpp` — shared utilities backing the mutator.
 - `CompressedMutator.cpp` — conservative mutations for RVC lanes.

@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-#include <fuzz/isa/Loader.hpp>
+#include <fuzz/isa/IsaLoader.hpp>
 #include <fuzz/mutator/MutatorConfig.hpp>
 #include <fuzz/mutator/MutatorInterface.hpp>
 
@@ -25,6 +25,7 @@ public:
 
   bool using_schema() const { return use_schema_; }
   const std::string &isa_name() const { return isa_.isa_name; }
+  Strategy strategy() const { return cfg_.strategy; }
 
 private:
   Config cfg_;

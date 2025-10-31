@@ -44,7 +44,8 @@ TARGET    = libisa_mutator.so
 SOURCES = \
   $(SRC_DIR)/Random.cpp \
   $(SRC_DIR)/MutatorConfig.cpp \
-  $(SRC_DIR)/isa_loader.cpp \
+  $(SRC_DIR)/YamlUtils.cpp \
+  $(SRC_DIR)/IsaLoader.cpp \
   $(SRC_DIR)/AFLInterface.cpp \
   $(SRC_DIR)/ISAMutator.cpp \
   $(SRC_DIR)/LegalCheck.cpp \

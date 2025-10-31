@@ -20,6 +20,20 @@ std::mutex &cli_mutex() {
   return m;
 }
 
+const char *strategy_token(mut::Strategy strategy) {
+  switch (strategy) {
+  case mut::Strategy::RAW:
+    return "RAW";
+  case mut::Strategy::IR:
+    return "IR";
+  case mut::Strategy::HYBRID:
+    return "HYBRID";
+  case mut::Strategy::AUTO:
+    return "AUTO";
+  }
+  return "IR";
+}
+
 std::string &cli_config_path() {
   static std::string path;
   return path;
@@ -62,6 +76,13 @@ int afl_custom_init(void * /*afl*/) {
                static_cast<int>(getpid()),
                static_cast<long>(time(nullptr)));
   return 0;
+}
+
+const char *mutator_get_active_strategy() {
+  mut::MutatorInterface &mutator = get_mutator();
+  if (auto *isa = dynamic_cast<mut::ISAMutator *>(&mutator))
+    return strategy_token(isa->strategy());
+  return "IR";
 }
 
 void afl_custom_deinit(void) {

@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-#include <fuzz/isa/Loader.hpp>
+#include <fuzz/isa/IsaLoader.hpp>
 
 namespace fuzz::mutator {
 

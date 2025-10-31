@@ -4,6 +4,9 @@
 
 extern "C" {
 
+void mutator_set_config_path(const char *path);
+const char *mutator_get_active_strategy();
+
 size_t afl_custom_mutator(void *afl,
                           unsigned char *buf,
                           size_t buf_size,

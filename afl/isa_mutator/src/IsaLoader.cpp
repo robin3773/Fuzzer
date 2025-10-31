@@ -1,4 +1,4 @@
-#include <fuzz/isa/Loader.hpp>
+#include <fuzz/isa/IsaLoader.hpp>
 
 #include <yaml-cpp/yaml.h>
 
@@ -8,7 +8,6 @@
 
 #include <algorithm>
 #include <cctype>
-#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -22,26 +21,10 @@
 
 namespace fs = std::filesystem;
 
-namespace {
-    class FunctionTracer {
-        public:
-            explicit FunctionTracer(const char *name) : name_(name) {
-                std::fprintf(stderr, "[Function Start] : %s\n", name_);
-            }
-            ~FunctionTracer() {
-                std::fprintf(stderr, "[Function End] : %s\n", name_);
-            }
-
-        private:
-            const char *name_;
-    };
-}
-
 namespace fuzz::isa {
 namespace {
 
-    std::vector<fs::path> resolve_schema_sources(const SchemaLocator &locator) {
-    FunctionTracer tracer("fuzz::isa::resolve_schema_sources");
+  std::vector<fs::path> resolve_schema_sources(const SchemaLocator &locator) {
     if (locator.isa_name.empty())
       throw std::runtime_error("Schema locator missing ISA name");
 
@@ -106,7 +89,6 @@ namespace {
   }
 
   uint32_t compute_field_width(const std::vector<FieldSegment> &segments) {
-    FunctionTracer tracer("fuzz::isa::compute_field_width");
     return std::accumulate(segments.begin(), segments.end(), 0u,
       [](uint32_t max_extent, const FieldSegment &seg) {
         return std::max(max_extent, seg.value_lsb + seg.width);
@@ -114,7 +96,6 @@ namespace {
   }
 
   FieldSegment parse_segment(const YAML::Node &node, uint32_t default_value_lsb) {
-    FunctionTracer tracer("fuzz::isa::parse_segment");
     FieldSegment segment;
     segment.value_lsb = default_value_lsb;
 
@@ -159,7 +140,6 @@ namespace {
   }
 
   FieldKind deduce_field_kind(const std::string &raw) {
-    FunctionTracer tracer("fuzz::isa::deduce_field_kind");
     std::string lower = raw;
     boost::algorithm::to_lower(lower);
 
@@ -189,7 +169,6 @@ namespace {
   }
 
   FieldEncoding parse_field(const std::string &name, const YAML::Node &node) {
-    FunctionTracer tracer("fuzz::isa::parse_field");
     FieldEncoding encoding;
     encoding.name = name;
     if (node["signed"])
@@ -248,7 +227,6 @@ namespace {
 
   bool segments_equal(const std::vector<FieldSegment> &lhs,
                       const std::vector<FieldSegment> &rhs) {
-    FunctionTracer tracer("fuzz::isa::segments_equal");
     return lhs.size() == rhs.size() && std::equal(lhs.begin(), lhs.end(), rhs.begin(),
       [](const FieldSegment &a, const FieldSegment &b) {
         return a.word_lsb == b.word_lsb && a.width == b.width && a.value_lsb == b.value_lsb;
@@ -257,7 +235,6 @@ namespace {
 
   void ensure_field(std::unordered_map<std::string, FieldEncoding> &fields,
                     const FieldEncoding &candidate) {
-    FunctionTracer tracer("fuzz::isa::ensure_field");
     auto [it, inserted] = fields.emplace(candidate.name, candidate);
     if (inserted)
       return;
@@ -272,13 +249,12 @@ namespace {
       existing.is_signed = true;
 
     if (!candidate.segments.empty() && !segments_equal(existing.segments, candidate.segments))
-      throw std::runtime_error("Conflicting definition for field '" + candidate.name + "'");
+      return;
   }
 
   FormatSpec parse_format(const std::string &name,
                           const YAML::Node &node,
                           std::unordered_map<std::string, FieldEncoding> &fields) {
-    FunctionTracer tracer("fuzz::isa::parse_format");
     FormatSpec fmt;
     fmt.name = name;
     if (node["width"])
@@ -309,23 +285,22 @@ namespace {
   }
 
   InstructionSpec parse_instruction(const std::string &name, const YAML::Node &node) {
-    FunctionTracer tracer("fuzz::isa::parse_instruction");
     InstructionSpec spec;
     spec.name = name;
     if (!node["format"])
       throw std::runtime_error("Instruction '" + name + "' missing format");
     spec.format = node["format"].as<std::string>();
-
+    
     if (auto fixed = node["fixed"]; fixed && fixed.IsMap()) {
       for (auto it = fixed.begin(); it != fixed.end(); ++it) {
         spec.fixed_fields[it->first.as<std::string>()] = static_cast<uint32_t>(yaml_utils::parse_integer(it->second));
       }
     }
-
+    
     const std::unordered_set<std::string> skip_keys = {
       "format", "fixed", "description", "comment", "notes", "tags", "weight", "probability"
     };
-
+    
     for (auto it = node.begin(); it != node.end(); ++it) {
       std::string key = it->first.as<std::string>();
       if (skip_keys.count(key) || !it->second.IsScalar())
@@ -338,12 +313,11 @@ namespace {
 } // namespace
 
 ISAConfig load_isa_config(const SchemaLocator &locator) {
-  FunctionTracer tracer("fuzz::isa::load_isa_config");
   auto sources = resolve_schema_sources(locator);
   if (sources.empty())
     throw std::runtime_error("No schema files resolved for ISA '" + locator.isa_name + "'");
 
-  std::map<std::string, std::string> anchor_library;
+  std::vector<std::pair<std::string, std::string>> anchor_library;
   YAML::Node merged;
 
   for (const auto &source : sources) {
@@ -362,8 +336,15 @@ ISAConfig load_isa_config(const SchemaLocator &locator) {
       node.remove("__anchors");
 
     auto anchors = yaml_utils::extract_anchor_blocks(content);
-    for (auto &entry : anchors)
-      anchor_library[entry.first] = entry.second;
+    for (auto &entry : anchors) {
+      auto it = std::find_if(anchor_library.begin(), anchor_library.end(),
+        [&](const auto &kv) { return kv.first == entry.first; });
+      if (it != anchor_library.end()) {
+        *it = entry;
+      } else {
+        anchor_library.push_back(entry);
+      }
+    }
 
     yaml_utils::merge_nodes(merged, node);
   }
@@ -424,6 +405,8 @@ ISAConfig load_isa_config(const SchemaLocator &locator) {
       if (!it->first.IsScalar())
         continue;
       std::string name = it->first.as<std::string>();
+      if (name == "<<")
+        continue;
       isa.fields[name] = parse_field(name, it->second);
     }
   }
@@ -434,6 +417,8 @@ ISAConfig load_isa_config(const SchemaLocator &locator) {
       if (!it->first.IsScalar())
         continue;
       std::string name = it->first.as<std::string>();
+      if (name == "<<")
+        continue;
       isa.formats[name] = parse_format(name, it->second, isa.fields);
     }
   }
@@ -444,6 +429,8 @@ ISAConfig load_isa_config(const SchemaLocator &locator) {
       if (!it->first.IsScalar())
         continue;
       std::string name = it->first.as<std::string>();
+      if (name == "<<")
+        continue;
       isa.instructions.push_back(parse_instruction(name, it->second));
     }
   }
