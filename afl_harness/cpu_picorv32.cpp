@@ -39,6 +39,8 @@ public:
   }
   ~CpuPicoRV32() override { delete top_; }
 
+
+// Clears memory and resets the CPU for 8 cycles.
   void reset() override {
     std::memset(mem_area, 0, sizeof(mem_area));
     top_->resetn    = 0;
@@ -49,6 +51,7 @@ public:
     top_->resetn = 1;
   }
 
+    // Loads binary input into memory (up to 64 KB).
   void load_input(const std::vector<unsigned char>& in) override {
     size_t copy_n = in.size() > MEM_BYTES ? MEM_BYTES : in.size();
     std::memcpy(mem_area, in.data(), copy_n);

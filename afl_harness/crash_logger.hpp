@@ -1,11 +1,12 @@
 #pragma once
 #include "harness_config.hpp"
 #include "utils.hpp"
+#include <cstdint>
+#include <exception>
+#include <filesystem>
+#include <iostream>
 #include <string>
 #include <vector>
-#include <cstdint>
-#include <unistd.h>
-#include <fcntl.h>
 
 class CrashLogger {
 public:
