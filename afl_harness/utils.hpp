@@ -1,61 +1,33 @@
 #pragma once
-#include <string>
-#include <vector>
-#include <sys/stat.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <errno.h>
+#include <cerrno>
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
-#include <sstream>
+#include <filesystem>
+#include <fstream>
 #include <iomanip>
-#include <cctype>
+#include <iostream>
+#include <stdexcept>
+#include <sstream>
+#include <string>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <vector>
 
 namespace utils {
 
-inline void ensure_dir(const std::string& path) {
-  if (path.empty()) return;
+inline void ensure_dir(const std::string &path) {
+  if (path.empty())
+    return;
 
-  // Normalize: remove trailing slashes (but keep single leading slash)
-  std::string p = path;
-  while (p.size() > 1 && p.back() == '/') p.pop_back();
-
-  // Handle absolute paths: start building from '/'
-  size_t pos = 0;
-  std::string cur;
-  if (p[0] == '/') {
-    cur = "/";
-    pos = 1;
-  }
-
-  // Create each path component progressively (mkdir -p behavior)
-  while (pos <= p.size()) {
-    size_t slash = p.find('/', pos);
-    std::string token;
-    if (slash == std::string::npos) {
-      token = p.substr(pos);
-      pos = p.size() + 1;
-    } else {
-      token = p.substr(pos, slash - pos);
-      pos = slash + 1;
-    }
-    if (token.empty()) continue;
-    if (!cur.empty() && cur.back() != '/') cur += '/';
-    cur += token;
-
-    if (::mkdir(cur.c_str(), 0700) != 0) {
-      if (errno == EEXIST) {
-        // already exists, fine
-      } else {
-        fprintf(stderr, "[HARNESS/UTILS] Failed to create directory %s: %s\n",
-                cur.c_str(), strerror(errno));
-        return;
-      }
-    } else {
-      printf("[HARNESS/UTILS] Created directory: %s\n", cur.c_str());
-    }
+  try {
+    std::filesystem::create_directories(path);
+    std::cout << "[INFO] Created directory: " << path << "\n";
+  } catch (const std::filesystem::filesystem_error &e) {
+    std::cerr << "[ERROR] Failed to create directory " << path
+              << ": " << e.what() << "\n";
   }
 }
 
@@ -70,6 +42,16 @@ inline void safe_write_all(int fd, const void* buf, size_t len) {
     }
     off += (size_t)n;
   }
+}
+
+inline void safe_write_all(const std::string &filepath, const void *buf, size_t len) {
+  std::ofstream out(filepath, std::ios::binary | std::ios::out);
+  if (!out)
+    throw std::runtime_error("Failed to open file: " + filepath);
+
+  out.write(static_cast<const char *>(buf), static_cast<std::streamsize>(len));
+  if (!out)
+    throw std::runtime_error("Failed to write all data to file: " + filepath);
 }
 
 inline std::string timestamp_now() {

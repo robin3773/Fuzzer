@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <iostream>
 #include <string>
+#include <system_error>
 #include <vector>
 
 class CrashLogger {
@@ -96,21 +97,35 @@ private:
            std::to_string(cycle);
   }
 
-  static void writeFile(const std::string& path, const std::vector<unsigned char>& data) {
+  static void writeFile(const std::string &path, const std::vector<unsigned char> &data) {
     std::string tmp = path + ".tmp";
-    int fd = ::open(tmp.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0644);
-    if (fd < 0) return;
-    utils::safe_write_all(fd, data.data(), data.size());
-    ::close(fd);
-    ::rename(tmp.c_str(), path.c_str());
+    try {
+      utils::safe_write_all(tmp, data.data(), data.size());
+      std::error_code ec;
+      std::filesystem::rename(tmp, path, ec);
+      if (ec) {
+        std::cerr << "[HARNESS/CRASH] Failed to rename " << tmp << " -> "
+                  << path << ": " << ec.message() << "\n";
+      }
+    } catch (const std::exception &e) {
+      std::cerr << "[HARNESS/CRASH] Failed to write crash bin '" << path
+                << "': " << e.what() << "\n";
+    }
   }
 
-  static void writeTextAtomically(const std::string& path, const std::string& text) {
+  static void writeTextAtomically(const std::string &path, const std::string &text) {
     std::string tmp = path + ".tmp";
-    int fd = ::open(tmp.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0644);
-    if (fd < 0) return;
-    utils::safe_write_all(fd, text.data(), text.size());
-    ::close(fd);
-    ::rename(tmp.c_str(), path.c_str());
+    try {
+      utils::safe_write_all(tmp, text.data(), text.size());
+      std::error_code ec;
+      std::filesystem::rename(tmp, path, ec);
+      if (ec) {
+        std::cerr << "[HARNESS/CRASH] Failed to rename " << tmp << " -> "
+                  << path << ": " << ec.message() << "\n";
+      }
+    } catch (const std::exception &e) {
+      std::cerr << "[HARNESS/CRASH] Failed to write crash log '" << path
+                << "': " << e.what() << "\n";
+    }
   }
 };

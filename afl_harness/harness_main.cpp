@@ -19,9 +19,10 @@
 static volatile sig_atomic_t g_sig = 0;
 static void sig_handler(int s) { g_sig = s; }
 
+//NOTE - install signal handlers for SIGSEGV, SIGILL, SIGBUS, SIGABRT
 static void install_signal_handlers() {
   struct sigaction sa;
-  std::memset(&sa, 0, sizeof(sa));
+  std::memset(&sa, 0, sizeof(sa));  // clean the struct
   sa.sa_handler = sig_handler;
   sigaction(SIGSEGV, &sa, nullptr);
   sigaction(SIGILL,  &sa, nullptr);
@@ -173,7 +174,7 @@ bool check_mem_align_store(const CpuIface* cpu, const CrashLogger& logger, unsig
 
 int main(int argc, char** argv) {
   HarnessConfig cfg;
-  cfg.load_from_env();
+  cfg.load_from_env(); // sets up crash_dir, objdump, xlen, max_cycles.
   utils::ensure_dir(cfg.crash_dir);
   install_signal_handlers();
 
@@ -184,6 +185,7 @@ int main(int argc, char** argv) {
   Verilated::randSeed(0);
 #endif
 
+  // Load input from file or stdin
   std::vector<unsigned char> input;
   if (argc > 1 && argv[1][0] != '-') {
     int fd = ::open(argv[1], O_RDONLY);
@@ -224,6 +226,7 @@ int main(int argc, char** argv) {
   const char* spike_env = std::getenv("SPIKE_BIN");
   const char* spike_isa_env = std::getenv("SPIKE_ISA");
   const char* pk_env = std::getenv("PK_BIN");
+
   std::string golden_mode = "live"; // default: keep per-instruction diff
   if (golden_mode_env && *golden_mode_env) golden_mode = std::string(golden_mode_env);
   // Back-compat: ENABLE_GOLDEN=spike implies GOLDEN_MODE=live
@@ -239,14 +242,14 @@ int main(int argc, char** argv) {
   } else if (golden_mode == "batch" || golden_mode == "replay") {
     // Not implemented yet in-harness; will be handled by external tools.
     use_golden = false;
-    printf("[HARNESS/GOLDEN] GOLDEN_MODE=%s requested; external replay/tools should be used.\n", golden_mode.c_str());
+    printf("[INFO] GOLDEN_MODE=%s requested; external replay/tools should be used.\n", golden_mode.c_str());
   }
 
   // Backend selection (future: fpga). Currently only 'verilator' is supported.
   const char* exec_backend_env = std::getenv("EXEC_BACKEND");
   std::string exec_backend = exec_backend_env && *exec_backend_env ? std::string(exec_backend_env) : std::string("verilator");
   if (exec_backend != "verilator") {
-    printf("[HARNESS] EXEC_BACKEND=%s not supported in this build, defaulting to verilator.\n", exec_backend.c_str());
+    printf("[INFO] EXEC_BACKEND=%s not supported in this build, defaulting to verilator.\n", exec_backend.c_str());
   }
 
   std::string tmp_elf;
