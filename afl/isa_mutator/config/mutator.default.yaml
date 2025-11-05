@@ -1,6 +1,6 @@
 # Default runtime settings mirroring historical in-code behaviour.
 strategy: IR
-verbose: false
+verbose: true
 enable_c: false
 
 probabilities:
@@ -12,6 +12,6 @@ weights:
   r_m: 30
 
 schemas:
-  isa: rv32imc
+  isa: rv32im
   root: ./schemas
   map: isa_map.yaml

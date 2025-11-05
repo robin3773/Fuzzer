@@ -16,7 +16,12 @@ TEST_SRC    := mutator_selftest.cpp
 SEED    ?= 12345
 REPEAT  ?= 5
 INPUT   ?= ../../../seeds/firmware.bin
-OBJDUMP ?= riscv32-unknown-elf-objdump
+OBJDUMP ?= /opt/riscv/riscv32-unknown-elf/bin/objdump
+
+# Environment variables for mutator
+MUTATOR_CONFIG ?= $(ROOT_DIR)/config/mutator.default.yaml
+SCHEMA_DIR     ?= $(ROOT_DIR)/../../schemas
+DEBUG_MUTATOR  ?=
 
 all: $(TEST_BIN)
 
@@ -30,14 +35,20 @@ run: $(TEST_BIN)
 		exit 1; \
 	fi
 	@echo "[+] Running mutator self-test..."
+	MUTATOR_CONFIG=$(MUTATOR_CONFIG) \
+	SCHEMA_DIR=$(SCHEMA_DIR) \
+	$(if $(DEBUG_MUTATOR),DEBUG_MUTATOR=$(DEBUG_MUTATOR),) \
 	OBJDUMP=$(OBJDUMP) ./$(TEST_BIN) \
 		--lib $(MUTATOR_SO) \
 		$(if $(INPUT),--in $(INPUT),) \
 		--seed $(SEED) \
 		--repeat $(REPEAT)
 
+debug: $(TEST_BIN)
+	@$(MAKE) run DEBUG_MUTATOR=1
+
 clean:
 	rm -f $(TEST_BIN)
 
-.PHONY: all clean run
+.PHONY: all clean run debug
 # ==========================================================

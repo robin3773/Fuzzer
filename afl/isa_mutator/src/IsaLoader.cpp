@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <hwfuzz/Log.hpp>
 #include <map>
 #include <numeric>
 #include <sstream>
@@ -41,7 +42,7 @@ namespace {
     if (!map_path.is_absolute())
       map_path = root / map_path;
 
-    printf("[INFO] Using ISA map: %s\n", map_path.string().c_str());
+  std::fprintf(hwfuzz::harness_log(), "[INFO] Using ISA Map: %s\n", map_path.string().c_str());
 
     std::vector<fs::path> schema_files;
     std::error_code ec;
@@ -329,6 +330,17 @@ ISAConfig load_isa_config_impl(const SchemaLocator &locator) {
       }
     }
 
+    // Count instructions in this file
+    size_t inst_count = 0;
+    if (node["instructions"] && node["instructions"].IsMap()) {
+      for (auto it = node["instructions"].begin(); it != node["instructions"].end(); ++it) {
+        if (it->first.IsScalar() && it->first.as<std::string>() != "<<") {
+          inst_count++;
+        }
+      }
+    }
+  std::fprintf(hwfuzz::harness_log(), "[INFO] Loading %s: %zu instructions\n", source.filename().string().c_str(), inst_count);
+
     yaml_utils::merge_nodes(merged, node);
   }
 
@@ -438,6 +450,11 @@ ISAConfig load_isa_config_impl(const SchemaLocator &locator) {
 ISAConfig load_isa_config(const std::string &isa_name) {
   // Read schema directory from environment variable
   const char *schema_dir_env = std::getenv("SCHEMA_DIR");
+  if (!schema_dir_env)
+    throw std::runtime_error("[ERROR] SCHEMA_DIR environment variable not set'\n");
+
+  std::fprintf(hwfuzz::harness_log(), "[INFO] Using schema directory: %s\n", schema_dir_env);
+
   
   SchemaLocator locator {
     .root_dir = schema_dir_env ? schema_dir_env : "./schemas",

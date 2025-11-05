@@ -12,7 +12,7 @@ This repo organizes RTL, harnesses, seeds and a single central `workdir/` where 
 | -------------- | -------------------------------------------------------------------- |
 | `rtl/`         | CPU RTL (put cores under `rtl/cpu/`) and sim wrappers (`rtl/top.sv`) |
 | `harness/`     | Verilator C++ harnesses, loaders, Makefile                           |
-| `tools/`       | Build/run/fuzz wrappers and logging wrappers                         |
+| `tools/`       | Build/run/fuzz wrappers, logging wrappers, and memory configuration  |
 | `seeds/`       | Initial corpus for AFL                                               |
 | `afl/`         | AFL tuning files and mutator source(s)                               |
 | `corpora/`     | AFL outputs (queue, crashes, hangs) — runtime only                   |
@@ -70,3 +70,23 @@ pip install pyelftools tabulate
 ./tools/run_fuzz_log.sh ./obj_dir/Vtop seeds workdir/corpora
 # AFL stdout/stderr will be saved to workdir/logs/afl/
 ```
+
+---
+
+## Memory Configuration
+
+All memory addresses (reset vector, RAM base, stack address, etc.) are centrally defined in **`tools/memory_config.mk`**. This single source of truth is used by:
+
+- **Firmware builds** (`firmware/Makefile`) - passed to linker via `-defsym`
+- **AFL harness** (`afl_harness/`) - passed via `-D` compiler flags  
+- **Runtime script** (`run.sh`) - sourced and exported as environment variables
+
+To change the memory layout, edit `tools/memory_config.mk` directly. See `tools/README.md` for detailed documentation on the memory configuration system, linker script usage, and integration examples.
+
+### Key Configuration Files
+
+- **`tools/memory_config.mk`** - Central memory layout (PROGADDR_RESET, RAM_BASE, STACK_ADDR, etc.)
+- **`tools/link.ld`** - Runtime-configurable linker script for RV32 firmware
+- **`run.sh`** - AFL++ fuzzing launcher with memory config integration
+
+---

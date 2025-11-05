@@ -6,6 +6,8 @@
 #include <cstring>
 #include <string>
 
+#include <hwfuzz/Log.hpp>
+
 namespace fuzz::mutator::debug {
 
 struct State {
@@ -47,7 +49,7 @@ inline void log_illegal(const char *src, uint32_t before, uint32_t after) {
   if (!S.enabled)
     return;
 
-  std::fprintf(stderr, "[ILLEGAL] %s()\n  before = 0x%08x\n  after  = 0x%08x\n",
+  std::fprintf(hwfuzz::harness_log(), "[ILLEGAL] %s()\n  before = 0x%08x\n  after  = 0x%08x\n",
                src, before, after);
 
   if (S.fp) {

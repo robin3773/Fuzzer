@@ -1,0 +1,131 @@
+#pragma once
+#include "HarnessConfig.hpp"
+#include "Utils.hpp"
+#include <cstdint>
+#include <exception>
+#include <filesystem>
+#include <iostream>
+#include <string>
+#include <system_error>
+#include <vector>
+
+class CrashLogger {
+public:
+  explicit CrashLogger(const HarnessConfig &cfg) : cfg_(cfg) {
+    utils::ensure_dir(cfg_.crash_dir);
+  }
+
+  void writeCrash(const std::string &reason,
+                  uint32_t pc,
+                  uint32_t insn,
+                  unsigned cycle,
+                  const std::vector<unsigned char> &input) const {
+
+    const std::string base = makeBaseName(reason, cycle);
+    const std::string bin_path = base + ".bin";
+    const std::string log_path = base + ".log";
+
+    writeFile(bin_path, input);
+
+    std::string log;
+    log.reserve(4096);
+    log += "Reason: " + reason + "\n";
+    log += "Cycle: " + std::to_string(cycle) + "\n";
+    log += "PC: 0x" + hex32(pc) + "\n";
+    log += "Instruction: 0x" + hex32(insn) + "\n\n";
+
+    log += "Hexdump:\n";
+    log += utils::hexdump(input);
+    log += "\n";
+
+    std::string dasm = utils::disassemble(input, cfg_.objdump, cfg_.xlen);
+    if (!dasm.empty()) {
+      log += "Disassembly:\n";
+      log += dasm;
+    }
+
+    writeTextAtomically(log_path, log);
+  }
+
+  // Write a crash with extra textual details (golden vs dut snapshot, repro, etc.)
+  void writeCrashDetailed(const std::string &reason,
+                          uint32_t pc,
+                          uint32_t insn,
+                          unsigned cycle,
+                          const std::vector<unsigned char> &input,
+                          const std::string &details) const {
+    const std::string base = makeBaseName(reason, cycle);
+    const std::string bin_path = base + ".bin";
+    const std::string log_path = base + ".log";
+    const std::string info_path = base + ".details.txt";
+
+    writeFile(bin_path, input);
+
+    std::string log;
+    log.reserve(4096);
+    log += "Reason: " + reason + "\n";
+    log += "Cycle: " + std::to_string(cycle) + "\n";
+    log += "PC: 0x" + hex32(pc) + "\n";
+    log += "Instruction: 0x" + hex32(insn) + "\n\n";
+    log += "Hexdump:\n";
+    log += utils::hexdump(input);
+    log += "\n";
+
+    std::string dasm = utils::disassemble(input, cfg_.objdump, cfg_.xlen);
+    if (!dasm.empty()) {
+      log += "Disassembly:\n";
+      log += dasm;
+    }
+
+    writeTextAtomically(log_path, log);
+    writeTextAtomically(info_path, details);
+  }
+
+private:
+  HarnessConfig cfg_;
+
+  static std::string hex32(uint32_t v) {
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%08x", v);
+    return std::string(buf);
+  }
+  
+  //
+  std::string makeBaseName(const std::string &reason, unsigned cycle) const {
+    std::string ts = utils::timestamp_now();
+    return cfg_.crash_dir + "/crash_" + reason + "_" + ts + "_cyc" +
+           std::to_string(cycle);
+  }
+
+  static void writeFile(const std::string &path, const std::vector<unsigned char> &data) {
+    std::string tmp = path + ".tmp";
+    try {
+      utils::safe_write_all(tmp, data.data(), data.size());
+      std::error_code ec;
+      std::filesystem::rename(tmp, path, ec);
+      if (ec) {
+        std::cerr << "[HARNESS/CRASH] Failed to rename " << tmp << " -> "
+                  << path << ": " << ec.message() << "\n";
+      }
+    } catch (const std::exception &e) {
+      std::cerr << "[HARNESS/CRASH] Failed to write crash bin '" << path
+                << "': " << e.what() << "\n";
+    }
+  }
+
+  static void writeTextAtomically(const std::string &path, const std::string &text) {
+    std::string tmp = path + ".tmp";
+    try {
+      utils::safe_write_all(tmp, text.data(), text.size());
+      std::error_code ec;
+      std::filesystem::rename(tmp, path, ec);
+      if (ec) {
+        std::cerr << "[HARNESS/CRASH] Failed to rename " << tmp << " -> "
+                  << path << ": " << ec.message() << "\n";
+      }
+    } catch (const std::exception &e) {
+      std::cerr << "[HARNESS/CRASH] Failed to write crash log '" << path
+                << "': " << e.what() << "\n";
+    }
+  }
+};

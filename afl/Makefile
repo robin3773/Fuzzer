@@ -17,9 +17,9 @@ HARNESS_DIR      := $(TOP_DIR)/afl_harness
 HARNESS_SRC_DIR  := $(HARNESS_DIR)/src
 HARNESS_INC_DIR  := $(HARNESS_DIR)/include
 HARNESS_SRCS := \
-  $(HARNESS_SRC_DIR)/harness_main.cpp \
-	$(HARNESS_SRC_DIR)/cpu_$(MODULE).cpp \
-	$(HARNESS_SRC_DIR)/spike_process.cpp
+  	$(HARNESS_SRC_DIR)/HarnessMain.cpp \
+	$(HARNESS_SRC_DIR)/CpuPicorv32.cpp \
+	$(HARNESS_SRC_DIR)/SpikeProcess.cpp
 # (headers are automatically included)
 # ------------------------------------------------------------
 
@@ -115,6 +115,7 @@ build: check dirs verilate $(MUT_SO)
 		-I$(OBJ_DIR) \
 		-I$(HARNESS_INC_DIR) \
 		-I$(HARNESS_SRC_DIR) \
+		-I$(TOP_DIR)/include \
 		-I/usr/share/verilator/include \
 		-I/usr/share/verilator/include/vltstd \
 		$(HARNESS_SRCS) \

@@ -20,7 +20,7 @@ else
 endif
 
 # Compiler flags
-CXXFLAGS := -std=c++17 -fPIC -Wall -Wextra -Wno-unused-parameter -Iinclude -O2
+CXXFLAGS := -std=c++17 -fPIC -Wall -Wextra -Wno-unused-parameter -Iinclude -I../../include -O2
 
 MUTATOR_CONFIG ?= $(abspath config/mutator.default.yaml)
 export MUTATOR_CONFIG

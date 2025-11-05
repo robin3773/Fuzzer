@@ -42,7 +42,6 @@ STRATEGY="${RV32_STRATEGY:-HYBRID}"
 ENABLE_C="${RV32_ENABLE_C:-1}"
 DEBUG_MUTATOR="${DEBUG_MUTATOR:-0}"
 MAX_CYCLES="${MAX_CYCLES:-50000}"
-RAM_SIZE_ARG=""
 
 NO_BUILD=0
 AFL_EXTRA_ARGS=""
@@ -59,7 +58,6 @@ Options:
       --enable-c [0|1]     Enable compressed instruction path (default: ${ENABLE_C})
   -m, --mem LIMIT          AFL memory limit, e.g. 4G or 'none' (default: ${MEM_LIMIT})
   -t, --timeout MS         AFL timeout in ms or 'none' (default: ${TIMEOUT})
-  --ram SIZE           RAM size in MB (allow decimals, e.g., 1M, 0.5M; default 1M)
       --seeds DIR          Input seeds dir (default: ${SEEDS_DIR})
   -o, --out DIR            AFL corpora/output dir (if omitted, uses a timestamped run dir)
       --runs DIR           Base directory to store timestamped runs (default: ${RUNS_DIR_DEFAULT})
@@ -72,7 +70,6 @@ Options:
       --max-cycles N       Pass MAX_CYCLES to harness
       --golden MODE        GOLDEN_MODE = live | off | batch | replay (default: live)
       --spike PATH         Path to Spike binary (SPIKE_BIN)
-      --pk PATH            Path to proxy kernel (PK_BIN)
       --objcopy PATH       Path to objcopy (OBJCOPY_BIN)
       --isa STR            Spike ISA string, e.g., rv32imc (SPIKE_ISA)
       --trace-mode on|off  Enable/disable harness trace writing (default: on)
@@ -89,36 +86,6 @@ EOF
 
 log() { printf "%s\n" "$@"; }
 
-parse_ram_size() {
-  local raw="$1"
-  local lower="${raw,,}"
-
-  if [[ ! "$lower" =~ ^([0-9]+([.][0-9]+)?|[.][0-9]+)m(b)?$ ]]; then
-    return 1
-  fi
-
-  local number="$lower"
-  number="${number%mb}"
-  number="${number%m}"
-
-  if [[ -z "$number" ]]; then
-    return 1
-  fi
-
-  local bytes
-  bytes=$(awk -v val="$number" 'BEGIN {
-    if (val + 0 <= 0) exit 1;
-    printf "%.0f", val * 1024 * 1024;
-  }') || return 1
-
-  if [[ -z "$bytes" || "$bytes" -le 0 ]]; then
-    return 1
-  fi
-
-  printf "%s" "$bytes"
-  return 0
-}
-
 # ---------- Parse args ----------
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -127,7 +94,6 @@ while [[ $# -gt 0 ]]; do
     --enable-c)        ENABLE_C="$2"; shift 2 ;;
     -m|--mem)          MEM_LIMIT="$2"; shift 2 ;;
     -t|--timeout)      TIMEOUT="$2"; shift 2 ;;
-    --ram)             RAM_SIZE_ARG="$2"; shift 2 ;;
     --seeds)           SEEDS_DIR="$(realpath -m "$2")"; shift 2 ;;
     --out)             CORPORA_DIR="$(realpath -m "$2")"; shift 2 ;;
     --runs)            RUNS_DIR="$(realpath -m "$2")"; shift 2 ;;
@@ -140,7 +106,6 @@ while [[ $# -gt 0 ]]; do
     --max-cycles)      MAX_CYCLES="$2"; shift 2 ;;
     --golden)          GOLDEN_MODE="$2"; shift 2 ;;
     --spike)           SPIKE_BIN="$(realpath -m "$2")"; shift 2 ;;
-    --pk)              PK_BIN="$(realpath -m "$2")"; shift 2 ;;
     --objcopy)         OBJCOPY_BIN="$(realpath -m "$2")"; shift 2 ;;
     --isa)             SPIKE_ISA="$2"; shift 2 ;;
     --trace-mode)      TRACE_MODE="$2"; shift 2 ;;
@@ -151,33 +116,30 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ---------- Derived paths & run dir ----------
-RAM_BASE_VALUE="${RAM_BASE:-0x80000000}"
-RAM_SIZE_SOURCE="${RAM_SIZE_ARG:-${RAM_SIZE:-1M}}"
-
-if ! RAM_SIZE_BYTES="$(parse_ram_size "$RAM_SIZE_SOURCE")"; then
-  log "[!] Invalid RAM size: $RAM_SIZE_SOURCE" >&2
-  exit 1
-fi
-if [[ "$RAM_SIZE_BYTES" -le 0 ]]; then
-  log "[!] RAM size must be greater than zero" >&2
+# Load memory configuration from centralized config file
+MEMORY_CONFIG="$PROJECT_ROOT/tools/memory_config.mk"
+if [[ ! -f "$MEMORY_CONFIG" ]]; then
+  log "[!] Memory config file not found: $MEMORY_CONFIG" >&2
   exit 1
 fi
 
-RAM_BASE_DEC=$((RAM_BASE_VALUE))
-RAM_SIZE_ALIGNED=$(((RAM_SIZE_BYTES + 3) & ~3))
-RAM_BASE_HEX=$(printf "0x%08X" "$RAM_BASE_DEC")
-RAM_SIZE_HEX=$(printf "0x%08X" "$RAM_SIZE_ALIGNED")
-PROGADDR_RESET=$(printf "0x%08X" "$RAM_BASE_DEC")
-PROGADDR_IRQ=$(printf "0x%08X" $((RAM_BASE_DEC + 0x10)))
-STACK_ADDR_HEX=$(printf "0x%08X" $((RAM_BASE_DEC + RAM_SIZE_ALIGNED - 4)))
+# Source memory addresses from the centralized config
+# Convert Make syntax (VAR := value) to bash exports
+eval "$(grep -E '^[A-Z_]+\s*:=\s*0x[0-9A-Fa-f]+' "$MEMORY_CONFIG" | sed 's/\s*:=\s*/=/' | sed 's/^/export /')"
 
-export RAM_BASE="$RAM_BASE_HEX"
-export RAM_SIZE="$RAM_SIZE_HEX"
-export RAM_SIZE_BYTES
-export RAM_SIZE_ALIGNED
-export PROGADDR_RESET PROGADDR_IRQ
-export STACK_ADDR="$STACK_ADDR_HEX"
-export STACKADDR="$STACK_ADDR_HEX"
+# Validate that critical values were loaded
+if [[ -z "${PROGADDR_RESET:-}" || -z "${RAM_BASE:-}" || -z "${STACK_ADDR:-}" ]]; then
+  log "[!] Failed to load memory configuration from $MEMORY_CONFIG" >&2
+  exit 1
+fi
+
+# Set aliases for compatibility
+export STACKADDR="$STACK_ADDR"
+export RAM_SIZE="$RAM_SIZE_ALIGNED"  # Alias for compatibility
+export TOHOST_ADDR
+
+# Calculate RAM_SIZE_BYTES decimal value for display
+RAM_SIZE_BYTES_DEC=$((RAM_SIZE_BYTES))
 
 RUN_DIR="${RUNS_DIR}/${STAMP}"
 mkdir -p "$RUN_DIR" "$SEEDS_DIR"
@@ -198,6 +160,10 @@ echo "[SETUP] Crash logs will go to: $CRASH_DIR"
 TRACES_DIR="${RUN_DIR}/traces"
 mkdir -p "$TRACES_DIR"
 
+HARNESS_STDIO_LOG="${RUN_DIR}/harness_stdio.log"
+: > "$HARNESS_STDIO_LOG"
+
+
 # ---------- Environment for AFL & mutator ----------
 export AFL_SKIP_CPUFREQ=1
 export AFL_CUSTOM_MUTATOR_LIBRARY="$MUTATOR_SO"
@@ -209,10 +175,15 @@ export MAX_CYCLES="$MAX_CYCLES"
 # Always set mutator config (default or user-specified)
 export MUTATOR_CONFIG
 
+# Set SCHEMA_DIR for ISA mutator
+export SCHEMA_DIR="${SCHEMA_DIR:-$PROJECT_ROOT/schemas}"
+
 # Propagate crash directory to harness using the name it expects
 export CRASH_LOG_DIR="$CRASH_DIR"
 export TRACE_DIR="$TRACES_DIR"
 export SPIKE_LOG_FILE
+export LINKER_SCRIPT="${LINKER_SCRIPT:-$PROJECT_ROOT/tools/link.ld}"
+export HARNESS_STDIO_LOG
 
 # Golden/trace/backend defaults (honor pre-set env if provided)
 export GOLDEN_MODE="${GOLDEN_MODE:-live}"
@@ -221,31 +192,74 @@ export TRACE_MODE="${TRACE_MODE:-on}"
 
 # Tooling defaults (if not provided via CLI/env)
 : "${SPIKE_BIN:=/opt/riscv/bin/spike}"
-: "${SPIKE_ISA:=rv32imc}"
-: "${PK_BIN:=/opt/riscv/riscv32-unknown-elf/bin/pk}"
-: "${OBJCOPY_BIN:=riscv32-unknown-elf-objcopy}"
+: "${SPIKE_ISA:=rv32im}"
+: "${OBJCOPY_BIN:=/opt/riscv/bin/riscv32-unknown-elf-objcopy}"
+: "${LD_BIN:=/opt/riscv/bin/riscv32-unknown-elf-ld}"
+: "${PC_STAGNATION_LIMIT:=512}"
+: "${MAX_PROGRAM_WORDS:=256}"
+: "${STOP_ON_SPIKE_DONE:=1}"
+: "${APPEND_EXIT_STUB:=1}"
 
-# Warn if defaults not found; allow harness fallback by unsetting
-if ! command -v "$SPIKE_BIN" >/dev/null 2>&1; then
-  echo "[WARN] SPIKE_BIN not found at '$SPIKE_BIN' and not on PATH. Golden mode may be disabled."
-fi
-if ! command -v "$OBJCOPY_BIN" >/dev/null 2>&1; then
-  echo "[WARN] OBJCOPY_BIN '$OBJCOPY_BIN' not found; harness will try 64-bit fallback."
-  unset OBJCOPY_BIN
-fi
-if [[ -n "${PK_BIN:-}" && ! -x "$PK_BIN" ]]; then
-  echo "[WARN] PK_BIN '$PK_BIN' not executable; Spike will run without pk."
-  unset PK_BIN
+# Check if golden mode is enabled and enforce tool requirements
+if [[ "$GOLDEN_MODE" != "off" ]]; then
+  # SPIKE_BIN is required for golden mode
+  if ! command -v "$SPIKE_BIN" >/dev/null 2>&1; then
+    log "[!] ERROR: SPIKE_BIN not found at '$SPIKE_BIN' and not on PATH." >&2
+    log "    Golden mode is enabled but Spike is not available." >&2
+    log "    Install Spike or set GOLDEN_MODE=off to continue." >&2
+    exit 1
+  fi
+  
+  # OBJCOPY_BIN is required for converting .bin to .elf
+  if ! command -v "$OBJCOPY_BIN" >/dev/null 2>&1; then
+    # Try 64-bit fallback
+    if command -v riscv64-unknown-elf-objcopy >/dev/null 2>&1; then
+      log "[INFO] Using riscv64-unknown-elf-objcopy as fallback"
+      OBJCOPY_BIN="riscv64-unknown-elf-objcopy"
+    else
+      log "[!] ERROR: OBJCOPY_BIN '$OBJCOPY_BIN' not found and no 64-bit fallback available." >&2
+      log "    Golden mode requires objcopy to convert .bin files to .elf for Spike." >&2
+      exit 1
+    fi
+  fi
+
+  if ! command -v "$LD_BIN" >/dev/null 2>&1; then
+    if command -v riscv32-unknown-elf-ld >/dev/null 2>&1; then
+      LD_BIN="riscv32-unknown-elf-ld"
+    elif command -v riscv64-unknown-elf-ld >/dev/null 2>&1; then
+      log "[INFO] Using riscv64-unknown-elf-ld as fallback"
+      LD_BIN="riscv64-unknown-elf-ld"
+    else
+      log "[!] ERROR: LD_BIN '$LD_BIN' not found and no fallback available." >&2
+      log "    Golden mode requires a RISC-V linker to wrap Spike inputs." >&2
+      exit 1
+    fi
+  fi
+else
+  # Golden mode is off, tools are optional
+  if ! command -v "$SPIKE_BIN" >/dev/null 2>&1; then
+    log "[INFO] SPIKE_BIN not found (golden mode is off, this is OK)"
+    unset SPIKE_BIN
+  fi
+  if ! command -v "$OBJCOPY_BIN" >/dev/null 2>&1; then
+    log "[INFO] OBJCOPY_BIN not found (golden mode is off, this is OK)"
+    unset OBJCOPY_BIN
+  fi
+  if ! command -v "$LD_BIN" >/dev/null 2>&1; then
+    log "[INFO] LD_BIN not found (golden mode is off, this is OK)"
+    unset LD_BIN
+  fi
 fi
 
 # Export detected/provided tooling
 if [[ -n "${SPIKE_BIN:-}" ]];   then export SPIKE_BIN; fi
 if [[ -n "${SPIKE_ISA:-}" ]];   then export SPIKE_ISA; fi
-if [[ -n "${PK_BIN:-}" ]];      then export PK_BIN; fi
 if [[ -n "${OBJCOPY_BIN:-}" ]]; then export OBJCOPY_BIN; fi
+if [[ -n "${LD_BIN:-}" ]];      then export LD_BIN; fi
+export PC_STAGNATION_LIMIT MAX_PROGRAM_WORDS STOP_ON_SPIKE_DONE APPEND_EXIT_STUB
 
-# Preserve these env vars in the target (colon-separated list for AFL++)
-export AFL_KEEP_ENV="CRASH_LOG_DIR:TRACE_DIR:MAX_CYCLES:RV32_STRATEGY:RV32_ENABLE_C:GOLDEN_MODE:EXEC_BACKEND:TRACE_MODE:SPIKE_BIN:SPIKE_ISA:PK_BIN:OBJCOPY_BIN:SPIKE_LOG_FILE:RAM_BASE:RAM_SIZE:PROGADDR_RESET:PROGADDR_IRQ:STACK_ADDR:STACKADDR:RAM_SIZE_BYTES:RAM_SIZE_ALIGNED:MUTATOR_CONFIG"
+# Preserve these env vars in the target (space-separated list for AFL++)
+export AFL_KEEP_ENV="CRASH_LOG_DIR TRACE_DIR MAX_CYCLES RV32_STRATEGY RV32_ENABLE_C GOLDEN_MODE EXEC_BACKEND TRACE_MODE SPIKE_BIN SPIKE_ISA OBJCOPY_BIN LD_BIN SPIKE_LOG_FILE LINKER_SCRIPT HARNESS_STDIO_LOG TOHOST_ADDR PC_STAGNATION_LIMIT MAX_PROGRAM_WORDS STOP_ON_SPIKE_DONE APPEND_EXIT_STUB RAM_BASE RAM_SIZE PROGADDR_RESET PROGADDR_IRQ STACK_ADDR STACKADDR MUTATOR_CONFIG SCHEMA_DIR"
 
 # Optional AFL debug (very chatty)
 if [[ "$AFL_DEBUG_FLAG" == "1" ]]; then
@@ -270,7 +284,7 @@ if [[ "$CORE_PATTERN" == \|* && -z "${AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES:-}" 
 fi
 
 # Preserve this env var in children as well (harmless if unset)
-export AFL_KEEP_ENV="$AFL_KEEP_ENV:AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES"
+export AFL_KEEP_ENV="$AFL_KEEP_ENV AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES"
 
 # ---------- Pretty banner ----------
 cat <<BANNER
@@ -291,9 +305,10 @@ cat <<BANNER
   Output Dir   : $CORPORA_DIR
   Run Log      : $LOG_FILE
   Spike Log    : $SPIKE_LOG_FILE
+  Harness Log  : $HARNESS_STDIO_LOG
   Max Cycles   : $MAX_CYCLES
   RAM Base     : $RAM_BASE
-  RAM Size     : $RAM_SIZE ($RAM_SIZE_ALIGNED bytes)
+  RAM Size     : $RAM_SIZE ($(printf "%d" $((RAM_SIZE_ALIGNED))) bytes)
   Reset PC     : $PROGADDR_RESET
   IRQ Vector   : $PROGADDR_IRQ
   Stack Addr   : $STACK_ADDR
@@ -303,22 +318,50 @@ cat <<BANNER
   Trace Mode   : $TRACE_MODE
   Crash Logs   : $CRASH_DIR
   Trace Dir    : $TRACES_DIR
+  tohost Addr  : ${TOHOST_ADDR:-<unset>}
+  Max Program  : ${MAX_PROGRAM_WORDS} words
+  PC Stall Lim : ${PC_STAGNATION_LIMIT} commits
+  Stop If Spike: ${STOP_ON_SPIKE_DONE}
   SPIKE_BIN    : ${SPIKE_BIN:-<default>}
   SPIKE_ISA    : ${SPIKE_ISA:-<default>}
-  PK_BIN       : ${PK_BIN:-<none>}
   OBJCOPY_BIN  : ${OBJCOPY_BIN:-<default>}
+  LD_BIN       : ${LD_BIN:-<default>}
   AFL_DEBUG_FLAG : $AFL_DEBUG_FLAG
 ==========================================================
 BANNER
 
 # ---------- Preconditions ----------
 if [[ "$NO_BUILD" -eq 1 ]]; then
-  if [[ ! -x "$FUZZ_BIN" || ! -f "$MUTATOR_SO" ]]; then
-    log "[!] --no-build requested but harness or mutator missing."
-    log "    FUZZ_BIN:   $FUZZ_BIN"
-    log "    MUTATOR_SO: $MUTATOR_SO"
+  if [[ ! -x "$FUZZ_BIN" ]]; then
+    log "[!] ERROR: Harness binary not found or not executable: $FUZZ_BIN" >&2
+    log "    Run without --no-build to build it, or check the path." >&2
     exit 1
   fi
+  if [[ ! -f "$MUTATOR_SO" ]]; then
+    log "[!] ERROR: Mutator library not found: $MUTATOR_SO" >&2
+    log "    Run without --no-build to build it, or check the path." >&2
+    exit 1
+  fi
+fi
+
+# Check if MUTATOR_CONFIG file exists
+if [[ ! -f "$MUTATOR_CONFIG" ]]; then
+  log "[!] ERROR: Mutator config file not found: $MUTATOR_CONFIG" >&2
+  exit 1
+fi
+
+# Check if SCHEMA_DIR exists
+if [[ ! -d "$SCHEMA_DIR" ]]; then
+  log "[!] ERROR: Schema directory not found: $SCHEMA_DIR" >&2
+  log "    ISA mutator requires schema files to operate." >&2
+  exit 1
+fi
+
+# Check if seeds directory has at least one file
+if [[ ! -d "$SEEDS_DIR" ]] || [[ -z "$(ls -A "$SEEDS_DIR" 2>/dev/null)" ]]; then
+  log "[!] ERROR: Seeds directory is empty or doesn't exist: $SEEDS_DIR" >&2
+  log "    AFL++ requires at least one seed file to start fuzzing." >&2
+  exit 1
 fi
 
 # ---------- Build (unless --no-build) ----------

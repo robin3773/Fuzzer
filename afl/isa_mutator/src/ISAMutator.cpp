@@ -1,5 +1,7 @@
 #include <fuzz/mutator/ISAMutator.hpp>
 
+#include <hwfuzz/Log.hpp>
+
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
@@ -30,7 +32,7 @@ const char *strategyToString(Strategy strategy) {
 }
 
 void logConfigSnapshot(const Config &cfg) {
-  std::fprintf(stderr,
+  std::fprintf(hwfuzz::harness_log(),
                "[INFO] strategy=%s verbose=%s enable_c=%s decode_prob=%u imm_random_prob=%u r_weight_base_alu=%u r_weight_m=%u isa_name=%s\n",
                strategyToString(cfg.strategy),
                cfg.verbose ? "true" : "false",
@@ -57,7 +59,7 @@ void ISAMutator::initFromEnv() {
   
   // Load ISA schema (required)
   if (cfg_.isa_name.empty()) {
-    std::fprintf(stderr, "[FATAL] No ISA name specified in config\n");
+  std::fprintf(hwfuzz::harness_log(), "[ERROR] No ISA name specified in config\n");
     std::exit(1);
   }
   
@@ -66,15 +68,16 @@ void ISAMutator::initFromEnv() {
     isa_ = isa::load_isa_config(cfg_.isa_name);
     
     if (isa_.instructions.empty()) {
-      std::fprintf(stderr, "[FATAL] No instructions in schema for ISA '%s'\n", cfg_.isa_name.c_str());
+  std::fprintf(hwfuzz::harness_log(), "[ERROR] No instructions in schema for ISA '%s'\n", cfg_.isa_name.c_str());
       std::exit(1);
     }
     
     use_schema_ = true;
     word_bytes_ = std::max<uint32_t>(1, isa_.base_width / 8);
-    std::fprintf(stderr, "[INFO] Loaded ISA '%s': %zu instructions\n", isa_.isa_name.c_str(), isa_.instructions.size());
+    //FIXME - Have to Fix Later
+    std::fprintf(hwfuzz::harness_log(), "[INFO] Loaded ISA '%s': %zu instructions\n", isa_.isa_name.c_str(), isa_.instructions.size());
   } catch (const std::exception &ex) {
-    std::fprintf(stderr, "[ERROR] Schema load failed: %s\n", ex.what());
+    std::fprintf(hwfuzz::harness_log(), "[ERROR] Schema load failed: %s\n", ex.what());
     std::exit(1);
   }
 }

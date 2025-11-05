@@ -5,6 +5,9 @@
 #  Author: Robin
 # ============================================================
 
+# ---- Include shared memory configuration ----
+include ../tools/memory_config.mk
+
 # ---- Directories ----
 SRC_DIR    := src
 BUILD_DIR  := build
@@ -20,7 +23,16 @@ OBJDUMP  := $(RISCV_PREFIX)objdump
 ARCH      := rv32im
 ABI       := ilp32
 ASFLAGS   := -march=$(ARCH) -mabi=$(ABI)
-LDFLAGS   := -Ttext=0x00000000
+
+# Pass memory configuration to linker via -defsym
+LDFLAGS   := -T../tools/link.ld \
+             -defsym PROGADDR_RESET=$(PROGADDR_RESET) \
+             -defsym PROGADDR_IRQ=$(PROGADDR_IRQ) \
+             -defsym ROM_BASE=$(ROM_BASE) \
+             -defsym ROM_SIZE=$(ROM_SIZE) \
+             -defsym RAM_BASE=$(RAM_BASE) \
+             -defsym RAM_SIZE=$(RAM_SIZE_ALIGNED) \
+             -defsym STACK_ADDR=$(STACK_ADDR)
 
 # ---- Sources and derived files ----
 ASM_SRC   := $(wildcard $(SRC_DIR)/*.[sS])
@@ -32,10 +44,17 @@ HEX       := $(OBJ:.o=.hex)
 DUMP      := $(OBJ:.o=.dump)
 
 # ---- Targets ----
-.PHONY: all clean dump dirs
+.PHONY: all clean dump dirs elf spike
 
 all: dirs $(BIN) $(HEX)
 	@echo "[✓] Built $(words $(ASM_SRC)) firmware images into $(BUILD_DIR)/"
+
+# Generate ELF and BIN files (needed for Spike and harness)
+elf: dirs $(ELF) $(BIN)
+	@echo "[✓] Built $(words $(ELF)) ELF files and $(words $(BIN)) BIN files"
+
+# Alias for spike
+spike: elf
 
 dirs:
 	@mkdir -p $(BUILD_DIR)

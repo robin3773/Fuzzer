@@ -7,6 +7,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <hwfuzz/Log.hpp>
 #include <stdexcept>
 #include <string>
 
@@ -284,7 +285,7 @@ Config loadConfigFromEnvOrDie() {
   // Get config path from environment variable
   const char *env_path = std::getenv("MUTATOR_CONFIG");
   if (!env_path) {
-    std::fprintf(stderr, "[ERROR] MUTATOR_CONFIG environment variable not set\n");
+  std::fprintf(hwfuzz::harness_log(), "[ERROR] MUTATOR_CONFIG environment variable not set\n");
     std::exit(1);
   }
   std::string config_path = env_path;
@@ -292,29 +293,42 @@ Config loadConfigFromEnvOrDie() {
   // Check if config file can be opened
   std::ifstream test_file(config_path);
   if (!test_file.is_open()) {
-    std::fprintf(stderr, "[ERROR] Cannot open config file: %s\n", config_path.c_str());
+  std::fprintf(hwfuzz::harness_log(), "[ERROR] Cannot open config file: %s\n", config_path.c_str());
     std::exit(1);
   }
   test_file.close();
-  std::fprintf(stderr, "[INFO] Config file opened successfully: %s\n", config_path.c_str());
+  std::fprintf(hwfuzz::harness_log(), "[INFO] Config file opened successfully: %s\n", config_path.c_str());
   
   // Load config
   Config cfg;
   try {
     if (!cfg.loadFromFile(config_path)) {
-      std::fprintf(stderr, "[ERROR] Failed to load config: %s\n", config_path.c_str());
+  std::fprintf(hwfuzz::harness_log(), "[ERROR] Failed to load config: %s\n", config_path.c_str());
       std::exit(1);
     }
   } catch (const std::exception &ex) {
-    std::fprintf(stderr, "[ERROR] Config load error: %s\n", ex.what());
+  std::fprintf(hwfuzz::harness_log(), "[ERROR] Config load error: %s\n", ex.what());
     std::exit(1);
   }
-  std::fprintf(stderr, "[INFO] Loaded config: %s\n", config_path.c_str());
+  std::fprintf(hwfuzz::harness_log(), "[INFO] Loaded config: %s\n", config_path.c_str());
   
   // Apply environment overrides
   cfg.applyEnvironment();
   
   return cfg;
+}
+
+void showConfig(const Config &cfg) {
+  std::fprintf(hwfuzz::harness_log(),
+               "[INFO] strategy=%s verbose=%s enable_c=%s decode_prob=%u imm_random_prob=%u r_weight_base_alu=%u r_weight_m=%u isa_name=%s\n",
+               strategy_to_string(cfg.strategy),
+               cfg.verbose ? "true" : "false",
+               cfg.enable_c ? "true" : "false",
+               cfg.decode_prob,
+               cfg.imm_random_prob,
+               cfg.r_weight_base_alu,
+               cfg.r_weight_m,
+               cfg.isa_name.c_str());
 }
 
 } // namespace fuzz::mutator

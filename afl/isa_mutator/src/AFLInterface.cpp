@@ -7,6 +7,8 @@
 #include <string>
 #include <unistd.h>
 
+#include <hwfuzz/Log.hpp>
+
 #include <fuzz/mutator/ISAMutator.hpp>
 #include <fuzz/mutator/MutatorDebug.hpp>
 #include <fuzz/mutator/Random.hpp>
@@ -71,7 +73,7 @@ void mutator_set_config_path(const char *path) {
 int afl_custom_init(void * /*afl*/) {
   (void)get_mutator();
   mut::Random::seed(static_cast<uint32_t>(time(nullptr)));
-  std::fprintf(stderr,
+  std::fprintf(hwfuzz::harness_log(),
                "[INFO] custom mutator initialized. pid=%d time=%ld\n",
                static_cast<int>(getpid()),
                static_cast<long>(time(nullptr)));
@@ -86,7 +88,7 @@ const char *mutator_get_active_strategy() {
 }
 
 void afl_custom_deinit(void) {
-  std::fprintf(stderr, "[mutator] deinit\n");
+  std::fprintf(hwfuzz::harness_log(), "[mutator] deinit\n");
   MutatorDebug::deinit();
 }
 

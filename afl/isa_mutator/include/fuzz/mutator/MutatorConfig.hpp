@@ -33,5 +33,7 @@ struct Config {
 
 // Load config from MUTATOR_CONFIG environment variable or exit
 Config loadConfigFromEnvOrDie();
+void showConfig(const Config &cfg);
+
 
 } // namespace fuzz::mutator
