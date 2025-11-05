@@ -25,13 +25,13 @@ struct Config {
   uint32_t r_weight_m = 30;
 
   std::string isa_name;
-  std::string schema_dir;
-  std::string schema_map;
-  std::string schema_override;
 
   bool loadFromFile(const std::string &path);
   void applyEnvironment();
   void dumpToFile(const std::string &path) const;
 };
+
+// Load config from MUTATOR_CONFIG environment variable or exit
+Config loadConfigFromEnvOrDie();
 
 } // namespace fuzz::mutator

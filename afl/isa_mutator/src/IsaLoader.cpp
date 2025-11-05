@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -24,29 +25,25 @@ namespace fs = std::filesystem;
 namespace fuzz::isa {
 namespace {
 
+  // Internal structure for locating schema files
+  struct SchemaLocator {
+    std::string root_dir;
+    std::string isa_name;
+    std::string map_path;
+  };
+
   std::vector<fs::path> resolve_schema_sources(const SchemaLocator &locator) {
     if (locator.isa_name.empty())
-      throw std::runtime_error("Schema locator missing ISA name");
+      throw std::runtime_error("[ERROR] Schema locator missing ISA name");
 
     fs::path root = locator.root_dir.empty() ? fs::path("./schemas") : fs::path(locator.root_dir);
-    fs::path override_path = locator.override_path.empty() ? fs::path() : fs::path(locator.override_path);
-    if (!override_path.empty() && !override_path.is_absolute())
-      override_path = root / override_path;
-
-    if (!override_path.empty()) {
-      std::vector<fs::path> ordered;
-      std::unordered_set<std::string> visited;
-      yaml_utils::collect_dependencies(override_path, ordered, visited);
-      if (ordered.empty())
-        throw std::runtime_error("Override schema file did not produce any sources");
-      return ordered;
-    }
-
     fs::path map_path = locator.map_path.empty() ? root / "isa_map.yaml" : fs::path(locator.map_path);
     if (!map_path.is_absolute())
       map_path = root / map_path;
 
-    std::vector<fs::path> seeds;
+    printf("[INFO] Using ISA map: %s\n", map_path.string().c_str());
+
+    std::vector<fs::path> schema_files;
     std::error_code ec;
     if (fs::exists(map_path, ec)) {
       auto includes = yaml_utils::includes_from_map(map_path, locator.isa_name);
@@ -57,33 +54,19 @@ namespace {
           candidate = root / candidate;
         candidate = candidate.lexically_normal();
         if (!fs::exists(candidate, ec)) {
-          throw std::runtime_error("Schema include '" + candidate.string() + "' referenced by ISA map not found");
+          throw std::runtime_error("[ERROR] Schema include '" + candidate.string() + "' referenced by ISA map not found");
         }
-        seeds.push_back(candidate);
+        schema_files.push_back(candidate);
       }
     }
 
-    if (seeds.empty()) {
-      std::vector<fs::path> candidates = {
-          root / locator.isa_name,
-          root / (locator.isa_name + ".yaml"),
-          root / "riscv" / (locator.isa_name + ".yaml"),
-          root / "riscv" / locator.isa_name};
-      for (const auto &candidate : candidates) {
-        if (fs::exists(candidate, ec)) {
-          seeds.push_back(candidate.lexically_normal());
-          break;
-        }
-      }
-    }
-
-    if (seeds.empty())
-      throw std::runtime_error("Unable to resolve schema sources for ISA '" + locator.isa_name + "'");
+    if (schema_files.empty())
+      throw std::runtime_error("[ERROR] Unable to resolve schema sources for ISA '" + locator.isa_name + "'");
 
     std::vector<fs::path> ordered;
     std::unordered_set<std::string> visited;
-    for (auto &seed : seeds)
-      yaml_utils::collect_dependencies(seed, ordered, visited);
+    for (auto &schema_file : schema_files)
+      yaml_utils::collect_dependencies(schema_file, ordered, visited);
 
     return ordered;
   }
@@ -312,7 +295,7 @@ namespace {
 
 } // namespace
 
-ISAConfig load_isa_config(const SchemaLocator &locator) {
+ISAConfig load_isa_config_impl(const SchemaLocator &locator) {
   auto sources = resolve_schema_sources(locator);
   if (sources.empty())
     throw std::runtime_error("No schema files resolved for ISA '" + locator.isa_name + "'");
@@ -450,6 +433,19 @@ ISAConfig load_isa_config(const SchemaLocator &locator) {
     isa.register_count = 32;
 
   return isa;
+}
+
+ISAConfig load_isa_config(const std::string &isa_name) {
+  // Read schema directory from environment variable
+  const char *schema_dir_env = std::getenv("SCHEMA_DIR");
+  
+  SchemaLocator locator {
+    .root_dir = schema_dir_env ? schema_dir_env : "./schemas",
+    .isa_name = isa_name,
+    .map_path = "isa_map.yaml"
+  };
+  
+  return load_isa_config_impl(locator);
 }
 
 } // namespace fuzz::isa

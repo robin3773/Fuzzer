@@ -20,6 +20,7 @@ PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"           # project root dir usual
 AFL_DIR="$PROJECT_ROOT/afl"
 FUZZ_BIN="$AFL_DIR/afl_picorv32"
 MUTATOR_SO="$AFL_DIR/isa_mutator/libisa_mutator.so"
+MUTATOR_CONFIG="$PROJECT_ROOT/afl/isa_mutator/config/mutator.default.yaml"
 
 STAMP="$(date +"%d-%b__%H-%M")"
 
@@ -35,12 +36,13 @@ CRASH_DIR=""                      # computed after args
 
 # ---------- Configurable params ----------
 CORES="${CORES:-1}"
-MEM_LIMIT="${MEM_LIMIT:-4G}"      # e.g., 4G or 'none'
+MEM_LIMIT="${MEM_LIMIT:-4G}"        # e.g., 4G or 'none'
 TIMEOUT="${TIMEOUT:-100000}"       # ms or 'none'
 STRATEGY="${RV32_STRATEGY:-HYBRID}"
 ENABLE_C="${RV32_ENABLE_C:-1}"
 DEBUG_MUTATOR="${DEBUG_MUTATOR:-0}"
 MAX_CYCLES="${MAX_CYCLES:-50000}"
+RAM_SIZE_ARG=""
 
 NO_BUILD=0
 AFL_EXTRA_ARGS=""
@@ -57,10 +59,12 @@ Options:
       --enable-c [0|1]     Enable compressed instruction path (default: ${ENABLE_C})
   -m, --mem LIMIT          AFL memory limit, e.g. 4G or 'none' (default: ${MEM_LIMIT})
   -t, --timeout MS         AFL timeout in ms or 'none' (default: ${TIMEOUT})
+  --ram SIZE           RAM size in MB (allow decimals, e.g., 1M, 0.5M; default 1M)
       --seeds DIR          Input seeds dir (default: ${SEEDS_DIR})
   -o, --out DIR            AFL corpora/output dir (if omitted, uses a timestamped run dir)
       --runs DIR           Base directory to store timestamped runs (default: ${RUNS_DIR_DEFAULT})
       --mutator PATH       Custom mutator .so (default: ${MUTATOR_SO})
+      --mutator-config PATH  Path to mutator config YAML file (default: afl/isa_mutator/config/mutator.default.yaml)
       --bin PATH           Harness binary (default: ${FUZZ_BIN})
       --afl-args "ARGS"    Extra args passed to afl-fuzz (e.g. "-d -x dict")
       --no-build           Skip building mutator/harness (assume ready)
@@ -85,6 +89,36 @@ EOF
 
 log() { printf "%s\n" "$@"; }
 
+parse_ram_size() {
+  local raw="$1"
+  local lower="${raw,,}"
+
+  if [[ ! "$lower" =~ ^([0-9]+([.][0-9]+)?|[.][0-9]+)m(b)?$ ]]; then
+    return 1
+  fi
+
+  local number="$lower"
+  number="${number%mb}"
+  number="${number%m}"
+
+  if [[ -z "$number" ]]; then
+    return 1
+  fi
+
+  local bytes
+  bytes=$(awk -v val="$number" 'BEGIN {
+    if (val + 0 <= 0) exit 1;
+    printf "%.0f", val * 1024 * 1024;
+  }') || return 1
+
+  if [[ -z "$bytes" || "$bytes" -le 0 ]]; then
+    return 1
+  fi
+
+  printf "%s" "$bytes"
+  return 0
+}
+
 # ---------- Parse args ----------
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -93,10 +127,12 @@ while [[ $# -gt 0 ]]; do
     --enable-c)        ENABLE_C="$2"; shift 2 ;;
     -m|--mem)          MEM_LIMIT="$2"; shift 2 ;;
     -t|--timeout)      TIMEOUT="$2"; shift 2 ;;
+    --ram)             RAM_SIZE_ARG="$2"; shift 2 ;;
     --seeds)           SEEDS_DIR="$(realpath -m "$2")"; shift 2 ;;
     --out)             CORPORA_DIR="$(realpath -m "$2")"; shift 2 ;;
     --runs)            RUNS_DIR="$(realpath -m "$2")"; shift 2 ;;
     --mutator)         MUTATOR_SO="$(realpath -m "$2")"; shift 2 ;;
+    --mutator-config)  MUTATOR_CONFIG="$(realpath -m "$2")"; shift 2 ;;
     --bin)             FUZZ_BIN="$(realpath -m "$2")"; shift 2 ;;
     --afl-args)        AFL_EXTRA_ARGS="$2"; shift 2 ;;
     --no-build)        NO_BUILD=1; shift ;;
@@ -115,6 +151,34 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ---------- Derived paths & run dir ----------
+RAM_BASE_VALUE="${RAM_BASE:-0x80000000}"
+RAM_SIZE_SOURCE="${RAM_SIZE_ARG:-${RAM_SIZE:-1M}}"
+
+if ! RAM_SIZE_BYTES="$(parse_ram_size "$RAM_SIZE_SOURCE")"; then
+  log "[!] Invalid RAM size: $RAM_SIZE_SOURCE" >&2
+  exit 1
+fi
+if [[ "$RAM_SIZE_BYTES" -le 0 ]]; then
+  log "[!] RAM size must be greater than zero" >&2
+  exit 1
+fi
+
+RAM_BASE_DEC=$((RAM_BASE_VALUE))
+RAM_SIZE_ALIGNED=$(((RAM_SIZE_BYTES + 3) & ~3))
+RAM_BASE_HEX=$(printf "0x%08X" "$RAM_BASE_DEC")
+RAM_SIZE_HEX=$(printf "0x%08X" "$RAM_SIZE_ALIGNED")
+PROGADDR_RESET=$(printf "0x%08X" "$RAM_BASE_DEC")
+PROGADDR_IRQ=$(printf "0x%08X" $((RAM_BASE_DEC + 0x10)))
+STACK_ADDR_HEX=$(printf "0x%08X" $((RAM_BASE_DEC + RAM_SIZE_ALIGNED - 4)))
+
+export RAM_BASE="$RAM_BASE_HEX"
+export RAM_SIZE="$RAM_SIZE_HEX"
+export RAM_SIZE_BYTES
+export RAM_SIZE_ALIGNED
+export PROGADDR_RESET PROGADDR_IRQ
+export STACK_ADDR="$STACK_ADDR_HEX"
+export STACKADDR="$STACK_ADDR_HEX"
+
 RUN_DIR="${RUNS_DIR}/${STAMP}"
 mkdir -p "$RUN_DIR" "$SEEDS_DIR"
 
@@ -141,6 +205,9 @@ export RV32_STRATEGY="$STRATEGY"
 export RV32_ENABLE_C="$ENABLE_C"
 export DEBUG_MUTATOR="$DEBUG_MUTATOR"
 export MAX_CYCLES="$MAX_CYCLES"
+
+# Always set mutator config (default or user-specified)
+export MUTATOR_CONFIG
 
 # Propagate crash directory to harness using the name it expects
 export CRASH_LOG_DIR="$CRASH_DIR"
@@ -177,8 +244,8 @@ if [[ -n "${SPIKE_ISA:-}" ]];   then export SPIKE_ISA; fi
 if [[ -n "${PK_BIN:-}" ]];      then export PK_BIN; fi
 if [[ -n "${OBJCOPY_BIN:-}" ]]; then export OBJCOPY_BIN; fi
 
-# Preserve these env vars in the target (SPACE-separated list)
-export AFL_KEEP_ENV="CRASH_LOG_DIR TRACE_DIR MAX_CYCLES RV32_STRATEGY RV32_ENABLE_C GOLDEN_MODE EXEC_BACKEND TRACE_MODE SPIKE_BIN SPIKE_ISA PK_BIN OBJCOPY_BIN SPIKE_LOG_FILE"
+# Preserve these env vars in the target (colon-separated list for AFL++)
+export AFL_KEEP_ENV="CRASH_LOG_DIR:TRACE_DIR:MAX_CYCLES:RV32_STRATEGY:RV32_ENABLE_C:GOLDEN_MODE:EXEC_BACKEND:TRACE_MODE:SPIKE_BIN:SPIKE_ISA:PK_BIN:OBJCOPY_BIN:SPIKE_LOG_FILE:RAM_BASE:RAM_SIZE:PROGADDR_RESET:PROGADDR_IRQ:STACK_ADDR:STACKADDR:RAM_SIZE_BYTES:RAM_SIZE_ALIGNED:MUTATOR_CONFIG"
 
 # Optional AFL debug (very chatty)
 if [[ "$AFL_DEBUG_FLAG" == "1" ]]; then
@@ -203,7 +270,7 @@ if [[ "$CORE_PATTERN" == \|* && -z "${AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES:-}" 
 fi
 
 # Preserve this env var in children as well (harmless if unset)
-export AFL_KEEP_ENV="$AFL_KEEP_ENV AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES"
+export AFL_KEEP_ENV="$AFL_KEEP_ENV:AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES"
 
 # ---------- Pretty banner ----------
 cat <<BANNER
@@ -212,6 +279,7 @@ cat <<BANNER
 ==========================================================
   Project Root : $PROJECT_ROOT
   Mutator SO   : $MUTATOR_SO
+  Mutator Cfg  : $MUTATOR_CONFIG
   Harness Bin  : $FUZZ_BIN
   Strategy     : $RV32_STRATEGY
   Enable C     : $ENABLE_C
@@ -224,6 +292,11 @@ cat <<BANNER
   Run Log      : $LOG_FILE
   Spike Log    : $SPIKE_LOG_FILE
   Max Cycles   : $MAX_CYCLES
+  RAM Base     : $RAM_BASE
+  RAM Size     : $RAM_SIZE ($RAM_SIZE_ALIGNED bytes)
+  Reset PC     : $PROGADDR_RESET
+  IRQ Vector   : $PROGADDR_IRQ
+  Stack Addr   : $STACK_ADDR
   Extra AFL    : ${AFL_EXTRA_ARGS:-<none>}
   Golden Mode  : $GOLDEN_MODE
   Exec Backend : $EXEC_BACKEND

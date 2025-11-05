@@ -13,11 +13,13 @@ OBJ_DIR     := $(TOP_DIR)/verilator/obj_dir
 
 # ----------------- HARNESS SOURCE STRUCTURE -----------------
 # Modular harness directory (replaces single testbench)
-HARNESS_DIR := $(TOP_DIR)/afl_harness
+HARNESS_DIR      := $(TOP_DIR)/afl_harness
+HARNESS_SRC_DIR  := $(HARNESS_DIR)/src
+HARNESS_INC_DIR  := $(HARNESS_DIR)/include
 HARNESS_SRCS := \
-  $(HARNESS_DIR)/harness_main.cpp \
-	$(HARNESS_DIR)/cpu_$(MODULE).cpp \
-	$(HARNESS_DIR)/spike_process.cpp
+  $(HARNESS_SRC_DIR)/harness_main.cpp \
+	$(HARNESS_SRC_DIR)/cpu_$(MODULE).cpp \
+	$(HARNESS_SRC_DIR)/spike_process.cpp
 # (headers are automatically included)
 # ------------------------------------------------------------
 
@@ -35,8 +37,19 @@ FUZZ_EXE    := $(AFL_DIR)/afl_$(MODULE)
 
 # Toolchain
 CXXFLAGS    ?= -std=c++17 -O2 -g -fno-omit-frame-pointer
-LDFLAGS     ?= -lpthread -latomic -ldl
+LDFLAGS     ?= -lpthread -latomic -ldl -lboost_system
 TRACE       ?= 0
+
+VERILATOR_G_FLAGS :=
+ifneq ($(strip $(PROGADDR_RESET)),)
+VERILATOR_G_FLAGS += -GPROGADDR_RESET=$(PROGADDR_RESET)
+endif
+ifneq ($(strip $(PROGADDR_IRQ)),)
+VERILATOR_G_FLAGS += -GPROGADDR_IRQ=$(PROGADDR_IRQ)
+endif
+ifneq ($(strip $(STACKADDR)),)
+VERILATOR_G_FLAGS += -GSTACKADDR=$(STACKADDR)
+endif
 
 YELLOW := \033[1;33m
 GREEN  := \033[1;32m
@@ -69,6 +82,7 @@ verilate:
 		-DRISCV_FORMAL \
 		--cc $(RTL_FILE) \
 		--top-module $(MODULE) \
+		$(VERILATOR_G_FLAGS) \
 		--Mdir $(OBJ_DIR)
 
 	@echo "$(GREEN)[OK] Verilated model generated$(RESET)"
@@ -99,7 +113,8 @@ build: check dirs verilate $(MUT_SO)
 	fi; \
 	afl-clang-fast++ $(CXXFLAGS) -fuse-ld=lld \
 		-I$(OBJ_DIR) \
-		-I$(HARNESS_DIR) \
+		-I$(HARNESS_INC_DIR) \
+		-I$(HARNESS_SRC_DIR) \
 		-I/usr/share/verilator/include \
 		-I/usr/share/verilator/include/vltstd \
 		$(HARNESS_SRCS) \

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -138,15 +139,6 @@ void apply_schema_block(const YAML::Node &node, Config &cfg) {
 
   assign_if_present(node, "isa", cfg.isa_name);
   assign_if_present(node, "isa_name", cfg.isa_name);
-  assign_if_present(node, "dir", cfg.schema_dir);
-  assign_if_present(node, "root", cfg.schema_dir);
-  assign_if_present(node, "schema_root", cfg.schema_dir);
-  assign_if_present(node, "map", cfg.schema_map);
-  assign_if_present(node, "map_file", cfg.schema_map);
-  assign_if_present(node, "schema_map", cfg.schema_map);
-  assign_if_present(node, "override", cfg.schema_override);
-  assign_if_present(node, "override_file", cfg.schema_override);
-  assign_if_present(node, "schema_override", cfg.schema_override);
 }
 
 } // namespace
@@ -201,21 +193,6 @@ bool Config::loadFromFile(const std::string &path) {
   if (auto node = root["isa_name"]; node)
     isa_name = node_to_string(node);
 
-  if (auto node = root["schema_dir"]; node)
-    schema_dir = node_to_string(node);
-
-  if (auto node = root["schema_override"]; node)
-    schema_override = node_to_string(node);
-
-  if (auto node = root["schema_map"]; node)
-    schema_map = node_to_string(node);
-
-  if (auto node = root["map"]; node)
-    schema_map = node_to_string(node);
-
-  if (auto node = root["schema_root"]; node)
-    schema_dir = node_to_string(node);
-
   return true;
 }
 
@@ -251,22 +228,6 @@ void Config::applyEnvironment() {
   s = std::getenv("MUTATOR_ISA");
   if (s && *s)
     isa_name = s;
-
-  s = std::getenv("MUTATOR_DIR");
-  if (s && *s)
-    schema_dir = s;
-
-  s = std::getenv("MUTATOR_SCHEMA");
-  if (s && *s)
-    schema_override = s;
-
-  s = std::getenv("MUTATOR_SCHEMAS");
-  if (s && *s)
-    schema_dir = s;
-
-  s = std::getenv("MUTATOR_SCHEMA_MAP");
-  if (s && *s)
-    schema_map = s;
 }
 
 void Config::dumpToFile(const std::string &path) const {
@@ -304,9 +265,6 @@ void Config::dumpToFile(const std::string &path) const {
   out << YAML::Key << "schemas" << YAML::Value;
   out << YAML::BeginMap;
   out << YAML::Key << "isa_name" << YAML::Value << isa_name;
-  out << YAML::Key << "dir" << YAML::Value << schema_dir;
-  out << YAML::Key << "map" << YAML::Value << schema_map;
-  out << YAML::Key << "override_file" << YAML::Value << schema_override;
   out << YAML::EndMap;
 
   out << YAML::EndMap;
@@ -320,6 +278,43 @@ void Config::dumpToFile(const std::string &path) const {
   ofs << out.c_str() << '\n';
   if (!ofs.good())
     throw std::runtime_error("Failed to write effective config to " + target.string());
+}
+
+Config loadConfigFromEnvOrDie() {
+  // Get config path from environment variable
+  const char *env_path = std::getenv("MUTATOR_CONFIG");
+  if (!env_path) {
+    std::fprintf(stderr, "[ERROR] MUTATOR_CONFIG environment variable not set\n");
+    std::exit(1);
+  }
+  std::string config_path = env_path;
+  
+  // Check if config file can be opened
+  std::ifstream test_file(config_path);
+  if (!test_file.is_open()) {
+    std::fprintf(stderr, "[ERROR] Cannot open config file: %s\n", config_path.c_str());
+    std::exit(1);
+  }
+  test_file.close();
+  std::fprintf(stderr, "[INFO] Config file opened successfully: %s\n", config_path.c_str());
+  
+  // Load config
+  Config cfg;
+  try {
+    if (!cfg.loadFromFile(config_path)) {
+      std::fprintf(stderr, "[ERROR] Failed to load config: %s\n", config_path.c_str());
+      std::exit(1);
+    }
+  } catch (const std::exception &ex) {
+    std::fprintf(stderr, "[ERROR] Config load error: %s\n", ex.what());
+    std::exit(1);
+  }
+  std::fprintf(stderr, "[INFO] Loaded config: %s\n", config_path.c_str());
+  
+  // Apply environment overrides
+  cfg.applyEnvironment();
+  
+  return cfg;
 }
 
 } // namespace fuzz::mutator

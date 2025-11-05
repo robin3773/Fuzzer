@@ -1,8 +1,7 @@
 #include <fuzz/mutator/CompressedMutator.hpp>
 
+#include <fuzz/mutator/EncodeHelpers.hpp>
 #include <fuzz/mutator/Random.hpp>
-
-#include "encode_helpers.hpp"
 
 namespace fuzz::mutator {
 

@@ -72,7 +72,7 @@ int afl_custom_init(void * /*afl*/) {
   (void)get_mutator();
   mut::Random::seed(static_cast<uint32_t>(time(nullptr)));
   std::fprintf(stderr,
-               "[mutator] custom mutator initialized. pid=%d time=%ld\n",
+               "[INFO] custom mutator initialized. pid=%d time=%ld\n",
                static_cast<int>(getpid()),
                static_cast<long>(time(nullptr)));
   return 0;
