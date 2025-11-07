@@ -26,12 +26,11 @@ inline void init_from_env() {
   State &S = state();
   const char *dbg = std::getenv("DEBUG_MUTATOR");
   S.enabled = (dbg && std::strcmp(dbg, "0") != 0);
-  const char *lg = std::getenv("DEBUG_LOG");
-  if (lg && std::strcmp(lg, "0") != 0) {
+  
+  // If debug is enabled, also enable file logging
+  if (S.enabled) {
     S.log_to_file = true;
-  S.path = (std::strcmp(lg, "1") == 0)
-         ? "afl/isa_mutator/logs/mutator_debug.log"
-                 : lg;
+    S.path = "afl/isa_mutator/logs/mutator_debug.log";
     S.fp = std::fopen(S.path.c_str(), "ab");
   }
 }

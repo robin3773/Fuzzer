@@ -2,6 +2,7 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include "QuietLog.hpp"
 
 namespace hwfuzz {
 
@@ -11,6 +12,11 @@ inline FILE*& harness_log_storage() {
 }
 
 inline FILE* harness_log() {
+  // Fast path: if quiet mode, return /dev/null immediately
+  if (is_quiet_mode()) {
+    return get_quiet_log();
+  }
+  
   FILE*& fp = harness_log_storage();
   if (fp) {
     return fp;

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <hwfuzz/Log.hpp>
 #include <cctype>
 #include <cstdlib>
 #include <filesystem>
@@ -68,10 +69,10 @@ struct HarnessConfig {
     }
 
     crash_dir = cd;
-    std::cout << "[INFO] Using crash directory: " << crash_dir << "\n";
+    std::fprintf(hwfuzz::harness_log(), "[INFO] Using crash directory: %s\n", crash_dir.c_str());
 
-    objdump = getenv_or("OBJDUMP", "riscv32-unknown-elf-objdump");
-    std::cout << "[INFO] Using objdump: " << objdump << "\n";
+    objdump = getenv_or("OBJDUMP", "/opt/riscv/bin/riscv32-unknown-elf-objdump");
+    std::fprintf(hwfuzz::harness_log(), "[INFO] Using objdump: %s\n", objdump.c_str());
 
     xlen = (getenv_or("XLEN", "32") == "64") ? 64 : 32;
 
@@ -90,12 +91,12 @@ struct HarnessConfig {
       use_tohost = true;
     }
 
-    std::cout << "[INFO] Max cycles: " << max_cycles << "\n";
-    std::cout << "[INFO] Max program words: " << max_program_words << "\n";
-    std::cout << "[INFO] PC stagnation limit: " << pc_stagnation_limit << "\n";
-    std::cout << "[INFO] Stop on Spike completion: " << (stop_on_spike_done ? "yes" : "no") << "\n";
+    std::fprintf(hwfuzz::harness_log(), "[INFO] Max cycles: %u\n", max_cycles);
+    std::fprintf(hwfuzz::harness_log(), "[INFO] Max program words: %u\n", max_program_words);
+    std::fprintf(hwfuzz::harness_log(), "[INFO] PC stagnation limit: %u\n", pc_stagnation_limit);
+    std::fprintf(hwfuzz::harness_log(), "[INFO] Stop on Spike completion: %s\n", stop_on_spike_done ? "yes" : "no");
     if (use_tohost) {
-      std::cout << "[INFO] tohost address: 0x" << std::hex << tohost_addr << std::dec << "\n";
+      std::fprintf(hwfuzz::harness_log(), "[INFO] tohost address: 0x%08x\n", tohost_addr);
     }
   }
 };

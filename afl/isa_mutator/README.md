@@ -41,25 +41,50 @@ make
 ## Use with AFL++ (example)
 ```bash
 AFL_CUSTOM_MUTATOR_LIBRARY=./afl/isa_mutator/libisa_mutator.so \
-RV32_STRATEGY=HYBRID RV32_DECODE_PROB=25 \
+MUTATOR_CONFIG=./afl/isa_mutator/config/mutator.default.yaml \
 afl-fuzz -i afl/seeds -o afl/corpora -- ./afl/afl_picorv32 @@
 ```
 
-## Runtime knobs (environment variables)
-- `RV32_STRATEGY` = `RAW | IR | HYBRID | AUTO`
-- `RV32_DECODE_PROB` = 0..100 chance of schema-guided mutation when in HYBRID/AUTO
-- `RV32_ENABLE_C` = 0/1 toggles compressed instruction mutations
-- `RV32_IMM_RANDOM` = 0..100 weighting for random immediates vs delta mutations
-- `RV32_R_BASE` / `RV32_R_M` = weights for ALU vs M-extension rules
-- `RV32_VERBOSE` = 0/1 prints configuration on init
-- `MUTATOR_ISA` / `MUTATOR_SCHEMAS` / `MUTATOR_SCHEMA` = control schema selection
+## Configuration
 
-The remaining RV32-specific environment variables are accepted for backward compatibility while the schema pipeline matures.
+All mutator settings are configured via YAML file specified by `MUTATOR_CONFIG` environment variable.
 
-## Configuration file
-- Default config lives at `afl/isa_mutator/config/mutator.default.yaml` and mirrors the legacy in-code defaults (legacy `mutator.yaml` is still accepted).
-- Resolution order: CLI `--config <path>` → `MUTATOR_CONFIG` env → per-ISA config (`afl/isa_mutator/config/<isa>.yaml`) → `mutator.default.yaml` → built-in defaults.
-- The self-test harness forwards `--config` into the shared object via `mutator_set_config_path` before `afl_custom_init` runs.
-- Set `MUTATOR_EFFECTIVE_CONFIG=/path/out.yaml` to capture the post-override configuration emitted at startup; the mutator will ensure the parent directory exists.
-- Environment variables listed above still win over file-supplied values, enabling per-run tweaks without editing YAML.
-- Sample profiles: `mutator.aggressive.yaml`, `mutator.riscv32e.yaml` (extend by dropping more files under `config/`).
+### YAML Configuration File
+- **Default**: `afl/isa_mutator/config/mutator.default.yaml`
+- **Resolution**: `MUTATOR_CONFIG` env → `mutator.default.yaml` → built-in defaults
+- **Sample profiles**: 
+  - `mutator.default.yaml` - Balanced settings (IR strategy, no compressed)
+  - `mutator.aggressive.yaml` - High mutation rates
+  - `mutator.riscv32e.yaml` - RV32E ISA variant
+
+### YAML Fields
+```yaml
+strategy: IR              # RAW | IR | HYBRID | AUTO
+verbose: true             # Enable startup config logging
+enable_c: false           # Enable compressed instructions
+
+probabilities:
+  decode: 60              # 0-100: schema-guided mutation chance (HYBRID/AUTO)
+  imm_random: 25          # 0-100: random immediate vs delta mutation
+
+weights:
+  r_base_alu: 70          # 0-100: ALU instruction weight
+  r_m: 30                 # 0-100: M-extension weight
+
+schemas:
+  isa: rv32im             # ISA name (maps to schemas/riscv/rv32*.yaml)
+  root: ./schemas         # Schema directory root
+  map: isa_map.yaml       # ISA mapping file
+```
+
+### Environment Variables
+- `MUTATOR_CONFIG` - Path to YAML config file (required)
+- `SCHEMA_DIR` - Override schema directory root
+- `MUTATOR_EFFECTIVE_CONFIG` - Path to dump effective config after loading
+- `DEBUG_MUTATOR` - Master debug switch: enables all logging, function tracing, and debug file output (0/1)
+
+**Note**: When `DEBUG_MUTATOR=1`, the mutator automatically:
+- Enables verbose logging to stdout (via harness_log)
+- Enables function entry/exit tracing
+- Creates debug log file at `afl/isa_mutator/logs/mutator_debug.log`
+- Logs illegal instruction mutations for analysis

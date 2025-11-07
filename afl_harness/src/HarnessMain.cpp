@@ -17,23 +17,19 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <iostream>
-#include <cerrno>
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/stat.h>
 #include <boost/process.hpp>
-#include <limits>
 
 namespace bp = boost::process;
 
 static volatile sig_atomic_t g_sig = 0;
 static void sig_handler(int s) { g_sig = s; }
 
-//NOTE - install signal handlers for SIGSEGV, SIGILL, SIGBUS, SIGABRT
 static void install_signal_handlers() {
   struct sigaction sa;
-  std::memset(&sa, 0, sizeof(sa));  // clean the struct
+  std::memset(&sa, 0, sizeof(sa));
   sa.sa_handler = sig_handler;
   sigaction(SIGSEGV, &sa, nullptr);
   sigaction(SIGILL,  &sa, nullptr);
@@ -305,16 +301,14 @@ int main(int argc, char** argv) {
   if (golden_mode == "off" || golden_mode == "none" || golden_mode == "0") {
     use_golden = false;
   } else if (golden_mode == "batch" || golden_mode == "replay") {
-    //FIXME - Not Implemented Yet
     use_golden = false;
-  std::fprintf(hwfuzz::harness_log(), "[INFO] GOLDEN_MODE=%s requested; external replay/tools should be used.\n", golden_mode.c_str());
+    std::fprintf(hwfuzz::harness_log(), "[INFO] GOLDEN_MODE=%s requested; external replay/tools should be used.\n", golden_mode.c_str());
   }
 
-  //FIXME Backend selection (future: fpga). Currently only 'verilator' is supported.
   const char* exec_backend_env = std::getenv("EXEC_BACKEND");
   std::string exec_backend = exec_backend_env && *exec_backend_env ? std::string(exec_backend_env) : std::string("verilator");
   if (exec_backend != "verilator") {
-  std::fprintf(hwfuzz::harness_log(), "[INFO] EXEC_BACKEND=%s not supported in this build, defaulting to verilator.\n", exec_backend.c_str());
+    std::fprintf(hwfuzz::harness_log(), "[INFO] EXEC_BACKEND=%s not supported in this build, defaulting to verilator.\n", exec_backend.c_str());
   }
 
   std::string tmp_elf;
@@ -341,7 +335,7 @@ int main(int argc, char** argv) {
         ::unlink(tmpobj.c_str());
         ::unlink(tmpbin_path.c_str());
       };
-      //TODO - This need to be adjusted for 64 bit.
+
       std::vector<std::string> objcopy_args{
         "-I", "binary",
         "-O", "elf32-littleriscv",
@@ -550,7 +544,8 @@ int main(int argc, char** argv) {
               oss << "DUT: pc=0x" << std::hex << rec.pc_w << "\n";
               oss << "GOLD: pc=0x" << std::hex << g.pc_w << "\n";
               logger.writeCrashDetailed("golden_divergence_pc", rec.pc_r, rec.insn, cyc, input, oss.str());
-              _exit(123);
+              std::fprintf(hwfuzz::harness_log(), "[CRASH] %s", oss.str().c_str());
+              std::abort();  // Send SIGABRT to AFL++ for crash detection
             }
 
             // Update Golden shadow regfile
@@ -585,7 +580,8 @@ int main(int argc, char** argv) {
               }
               oss << "\nRepro: run harness binary with same input file.";
               logger.writeCrashDetailed("golden_divergence_regfile", rec.pc_r, rec.insn, cyc, input, oss.str());
-              _exit(123);
+              std::fprintf(hwfuzz::harness_log(), "[CRASH] %s", oss.str().c_str());
+              std::abort();  // Send SIGABRT to AFL++ for crash detection
             }
 
             // Memory effect comparison (best-effort): compare presence and address
@@ -597,7 +593,8 @@ int main(int argc, char** argv) {
               oss << "DUT: load=" << (dut_load?"1":"0") << " store=" << (dut_store?"1":"0") << " addr=0x" << std::hex << rec.mem_addr << "\n";
               oss << "GOLD: load=" << (g.mem_is_load?"1":"0") << " store=" << (g.mem_is_store?"1":"0") << " addr=0x" << std::hex << g.mem_addr << "\n";
               logger.writeCrashDetailed("golden_divergence_mem_kind", rec.pc_r, rec.insn, cyc, input, oss.str());
-              _exit(123);
+              std::fprintf(hwfuzz::harness_log(), "[CRASH] %s", oss.str().c_str());
+              std::abort();  // Send SIGABRT to AFL++ for crash detection
             }
             if (dut_store && g.mem_is_store && (rec.mem_addr != g.mem_addr)) {
               std::ostringstream oss;
@@ -605,7 +602,8 @@ int main(int argc, char** argv) {
               oss << "DUT: addr=0x" << std::hex << rec.mem_addr << " wmask=0x" << std::hex << rec.mem_wmask << "\n";
               oss << "GOLD: addr=0x" << std::hex << g.mem_addr << " data=0x" << std::hex << g.mem_wdata << "\n";
               logger.writeCrashDetailed("golden_divergence_mem_store_addr", rec.pc_r, rec.insn, cyc, input, oss.str());
-              _exit(123);
+              std::fprintf(hwfuzz::harness_log(), "[CRASH] %s", oss.str().c_str());
+              std::abort();  // Send SIGABRT to AFL++ for crash detection
             }
             if (dut_load && g.mem_is_load && (rec.mem_addr != g.mem_addr)) {
               std::ostringstream oss;
@@ -613,7 +611,8 @@ int main(int argc, char** argv) {
               oss << "DUT: addr=0x" << std::hex << rec.mem_addr << " rmask=0x" << std::hex << rec.mem_rmask << "\n";
               oss << "GOLD: addr=0x" << std::hex << g.mem_addr << " data=0x" << std::hex << g.mem_rdata << "\n";
               logger.writeCrashDetailed("golden_divergence_mem_load_addr", rec.pc_r, rec.insn, cyc, input, oss.str());
-              _exit(123);
+              std::fprintf(hwfuzz::harness_log(), "[CRASH] %s", oss.str().c_str());
+              std::abort();  // Send SIGABRT to AFL++ for crash detection
             }
 
             // CSR comparison: mcycle/minstret shadow vs golden model
@@ -622,14 +621,16 @@ int main(int argc, char** argv) {
               oss << "Golden vs DUT mismatch: csr_minstret\n";
               oss << "DUT: minstret=" << std::dec << dut_minstret << " GOLD: " << gold_minstret << "\n";
               logger.writeCrashDetailed("golden_divergence_csr_minstret", rec.pc_r, rec.insn, cyc, input, oss.str());
-              _exit(123);
+              std::fprintf(hwfuzz::harness_log(), "[CRASH] %s", oss.str().c_str());
+              std::abort();  // Send SIGABRT to AFL++ for crash detection
             }
             if (dut_mcycle != gold_mcycle) {
               std::ostringstream oss;
               oss << "Golden vs DUT mismatch: csr_mcycle\n";
               oss << "DUT: mcycle=" << std::dec << dut_mcycle << " GOLD: " << gold_mcycle << "\n";
               logger.writeCrashDetailed("golden_divergence_csr_mcycle", rec.pc_r, rec.insn, cyc, input, oss.str());
-              _exit(123);
+              std::fprintf(hwfuzz::harness_log(), "[CRASH] %s", oss.str().c_str());
+              std::abort();  // Send SIGABRT to AFL++ for crash detection
             }
 
           } else {

@@ -38,8 +38,6 @@ CRASH_DIR=""                      # computed after args
 CORES="${CORES:-1}"
 MEM_LIMIT="${MEM_LIMIT:-4G}"        # e.g., 4G or 'none'
 TIMEOUT="${TIMEOUT:-100000}"       # ms or 'none'
-STRATEGY="${RV32_STRATEGY:-HYBRID}"
-ENABLE_C="${RV32_ENABLE_C:-1}"
 DEBUG_MUTATOR="${DEBUG_MUTATOR:-0}"
 MAX_CYCLES="${MAX_CYCLES:-50000}"
 
@@ -54,8 +52,6 @@ Usage: $0 [options]
 
 Options:
   -c, --cores N            Number of AFL workers (default: ${CORES})
-  -s, --strategy STR       RV32_STRATEGY = RAW | IR | HYBRID | AUTO (default: ${STRATEGY})
-      --enable-c [0|1]     Enable compressed instruction path (default: ${ENABLE_C})
   -m, --mem LIMIT          AFL memory limit, e.g. 4G or 'none' (default: ${MEM_LIMIT})
   -t, --timeout MS         AFL timeout in ms or 'none' (default: ${TIMEOUT})
       --seeds DIR          Input seeds dir (default: ${SEEDS_DIR})
@@ -90,8 +86,6 @@ log() { printf "%s\n" "$@"; }
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -c|--cores)        CORES="$2"; shift 2 ;;
-    -s|--strategy)     STRATEGY="$2"; shift 2 ;;
-    --enable-c)        ENABLE_C="$2"; shift 2 ;;
     -m|--mem)          MEM_LIMIT="$2"; shift 2 ;;
     -t|--timeout)      TIMEOUT="$2"; shift 2 ;;
     --seeds)           SEEDS_DIR="$(realpath -m "$2")"; shift 2 ;;
@@ -160,20 +154,35 @@ echo "[SETUP] Crash logs will go to: $CRASH_DIR"
 TRACES_DIR="${RUN_DIR}/traces"
 mkdir -p "$TRACES_DIR"
 
-HARNESS_STDIO_LOG="${RUN_DIR}/harness_stdio.log"
+# Combined log for both ISA mutator and AFL harness
+# All harness/mutator output goes here - only AFL++ uses stdout/stderr
+LOGS_DIR="${RUN_DIR}/logs"
+mkdir -p "$LOGS_DIR"
+HARNESS_STDIO_LOG="${LOGS_DIR}/harness.log"
 : > "$HARNESS_STDIO_LOG"
 
+# ---------- Load fuzzer environment configuration ----------
+FUZZER_ENV="${PROJECT_ROOT}/fuzzer.env"
+if [[ -f "$FUZZER_ENV" ]]; then
+  log "[CONFIG] Loading environment from: $FUZZER_ENV"
+  # Source the config file to load default env vars (won't override existing ones)
+  set -a  # Auto-export all variables
+  source "$FUZZER_ENV"
+  set +a
+else
+  log "[WARN] fuzzer.env not found at: $FUZZER_ENV"
+  log "       Using command-line defaults only"
+fi
 
 # ---------- Environment for AFL & mutator ----------
+# Note: Defaults are loaded from fuzzer.env; these exports allow CLI overrides
 export AFL_SKIP_CPUFREQ=1
 export AFL_CUSTOM_MUTATOR_LIBRARY="$MUTATOR_SO"
-export RV32_STRATEGY="$STRATEGY"
-export RV32_ENABLE_C="$ENABLE_C"
-export DEBUG_MUTATOR="$DEBUG_MUTATOR"
-export MAX_CYCLES="$MAX_CYCLES"
+export DEBUG_MUTATOR="${DEBUG_MUTATOR:-0}"
+export MAX_CYCLES="${MAX_CYCLES:-50000}"
 
 # Always set mutator config (default or user-specified)
-export MUTATOR_CONFIG
+export MUTATOR_CONFIG="${MUTATOR_CONFIG:-$PROJECT_ROOT/afl/isa_mutator/config/mutator.default.yaml}"
 
 # Set SCHEMA_DIR for ISA mutator
 export SCHEMA_DIR="${SCHEMA_DIR:-$PROJECT_ROOT/schemas}"
@@ -185,20 +194,21 @@ export SPIKE_LOG_FILE
 export LINKER_SCRIPT="${LINKER_SCRIPT:-$PROJECT_ROOT/tools/link.ld}"
 export HARNESS_STDIO_LOG
 
-# Golden/trace/backend defaults (honor pre-set env if provided)
+# Golden/trace/backend defaults (from fuzzer.env or CLI overrides)
 export GOLDEN_MODE="${GOLDEN_MODE:-live}"
-export EXEC_BACKEND="${EXEC_BACKEND:-verilator}"
 export TRACE_MODE="${TRACE_MODE:-on}"
+export EXEC_BACKEND="${EXEC_BACKEND:-verilator}"
 
-# Tooling defaults (if not provided via CLI/env)
-: "${SPIKE_BIN:=/opt/riscv/bin/spike}"
-: "${SPIKE_ISA:=rv32im}"
-: "${OBJCOPY_BIN:=/opt/riscv/bin/riscv32-unknown-elf-objcopy}"
-: "${LD_BIN:=/opt/riscv/bin/riscv32-unknown-elf-ld}"
-: "${PC_STAGNATION_LIMIT:=512}"
-: "${MAX_PROGRAM_WORDS:=256}"
-: "${STOP_ON_SPIKE_DONE:=1}"
-: "${APPEND_EXIT_STUB:=1}"
+# Tooling paths (defaults from fuzzer.env)
+export SPIKE_BIN="${SPIKE_BIN:-/opt/riscv/bin/spike}"
+export SPIKE_ISA="${SPIKE_ISA:-rv32im}"
+export OBJCOPY_BIN="${OBJCOPY_BIN:-/opt/riscv/bin/riscv32-unknown-elf-objcopy}"
+export OBJDUMP_BIN="${OBJDUMP_BIN:-/opt/riscv/bin/riscv32-unknown-elf-objdump}"
+export LD_BIN="${LD_BIN:-/opt/riscv/bin/riscv32-unknown-elf-ld}"
+export PC_STAGNATION_LIMIT="${PC_STAGNATION_LIMIT:-512}"
+export MAX_PROGRAM_WORDS="${MAX_PROGRAM_WORDS:-256}"
+export STOP_ON_SPIKE_DONE="${STOP_ON_SPIKE_DONE:-1}"
+export APPEND_EXIT_STUB="${APPEND_EXIT_STUB:-1}"
 
 # Check if golden mode is enabled and enforce tool requirements
 if [[ "$GOLDEN_MODE" != "off" ]]; then
@@ -255,11 +265,12 @@ fi
 if [[ -n "${SPIKE_BIN:-}" ]];   then export SPIKE_BIN; fi
 if [[ -n "${SPIKE_ISA:-}" ]];   then export SPIKE_ISA; fi
 if [[ -n "${OBJCOPY_BIN:-}" ]]; then export OBJCOPY_BIN; fi
+if [[ -n "${OBJDUMP_BIN:-}" ]]; then export OBJDUMP_BIN; fi
 if [[ -n "${LD_BIN:-}" ]];      then export LD_BIN; fi
 export PC_STAGNATION_LIMIT MAX_PROGRAM_WORDS STOP_ON_SPIKE_DONE APPEND_EXIT_STUB
 
 # Preserve these env vars in the target (space-separated list for AFL++)
-export AFL_KEEP_ENV="CRASH_LOG_DIR TRACE_DIR MAX_CYCLES RV32_STRATEGY RV32_ENABLE_C GOLDEN_MODE EXEC_BACKEND TRACE_MODE SPIKE_BIN SPIKE_ISA OBJCOPY_BIN LD_BIN SPIKE_LOG_FILE LINKER_SCRIPT HARNESS_STDIO_LOG TOHOST_ADDR PC_STAGNATION_LIMIT MAX_PROGRAM_WORDS STOP_ON_SPIKE_DONE APPEND_EXIT_STUB RAM_BASE RAM_SIZE PROGADDR_RESET PROGADDR_IRQ STACK_ADDR STACKADDR MUTATOR_CONFIG SCHEMA_DIR"
+export AFL_KEEP_ENV="CRASH_LOG_DIR TRACE_DIR MAX_CYCLES GOLDEN_MODE EXEC_BACKEND TRACE_MODE SPIKE_BIN SPIKE_ISA OBJCOPY_BIN OBJDUMP_BIN LD_BIN SPIKE_LOG_FILE LINKER_SCRIPT HARNESS_STDIO_LOG TOHOST_ADDR PC_STAGNATION_LIMIT MAX_PROGRAM_WORDS STOP_ON_SPIKE_DONE APPEND_EXIT_STUB RAM_BASE RAM_SIZE PROGADDR_RESET PROGADDR_IRQ STACK_ADDR STACKADDR MUTATOR_CONFIG SCHEMA_DIR"
 
 # Optional AFL debug (very chatty)
 if [[ "$AFL_DEBUG_FLAG" == "1" ]]; then
@@ -295,8 +306,6 @@ cat <<BANNER
   Mutator SO   : $MUTATOR_SO
   Mutator Cfg  : $MUTATOR_CONFIG
   Harness Bin  : $FUZZ_BIN
-  Strategy     : $RV32_STRATEGY
-  Enable C     : $ENABLE_C
   Debug        : $DEBUG_MUTATOR (AFL_DEBUG=$AFL_DEBUG_FLAG)
   Cores        : $CORES
   Timeout      : $TIMEOUT
@@ -305,7 +314,7 @@ cat <<BANNER
   Output Dir   : $CORPORA_DIR
   Run Log      : $LOG_FILE
   Spike Log    : $SPIKE_LOG_FILE
-  Harness Log  : $HARNESS_STDIO_LOG
+  Harness+Mutator Log : $HARNESS_STDIO_LOG
   Max Cycles   : $MAX_CYCLES
   RAM Base     : $RAM_BASE
   RAM Size     : $RAM_SIZE ($(printf "%d" $((RAM_SIZE_ALIGNED))) bytes)
@@ -325,6 +334,7 @@ cat <<BANNER
   SPIKE_BIN    : ${SPIKE_BIN:-<default>}
   SPIKE_ISA    : ${SPIKE_ISA:-<default>}
   OBJCOPY_BIN  : ${OBJCOPY_BIN:-<default>}
+  OBJDUMP_BIN  : ${OBJDUMP_BIN:-<default>}
   LD_BIN       : ${LD_BIN:-<default>}
   AFL_DEBUG_FLAG : $AFL_DEBUG_FLAG
 ==========================================================

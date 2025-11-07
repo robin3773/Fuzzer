@@ -1,4 +1,5 @@
 #pragma once
+#include <hwfuzz/Log.hpp>
 #include <cerrno>
 #include <cctype>
 #include <cstdio>
@@ -24,10 +25,9 @@ inline void ensure_dir(const std::string &path) {
 
   try {
     std::filesystem::create_directories(path);
-    std::cout << "[INFO] Created directory: " << path << "\n";
+    std::fprintf(hwfuzz::harness_log(), "[INFO] Created directory: %s\n", path.c_str());
   } catch (const std::filesystem::filesystem_error &e) {
-    std::cerr << "[ERROR] Failed to create directory " << path
-              << ": " << e.what() << "\n";
+    std::fprintf(hwfuzz::harness_log(), "[ERROR] Failed to create directory %s: %s\n", path.c_str(), e.what());
   }
 }
 

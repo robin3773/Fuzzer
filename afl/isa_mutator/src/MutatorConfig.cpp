@@ -198,37 +198,9 @@ bool Config::loadFromFile(const std::string &path) {
 }
 
 void Config::applyEnvironment() {
-  const char *s = std::getenv("RV32_STRATEGY");
-  if (s && *s)
-    strategy = parse_strategy_token(s, strategy);
-
-  s = std::getenv("RV32_VERBOSE");
-  if (s)
-    verbose = (std::strcmp(s, "0") != 0);
-
-  s = std::getenv("RV32_ENABLE_C");
-  if (s)
-    enable_c = (std::strcmp(s, "0") != 0);
-
-  s = std::getenv("RV32_DECODE_PROB");
-  if (s)
-    decode_prob = clamp_pct(std::atoi(s));
-
-  s = std::getenv("RV32_IMM_RANDOM");
-  if (s)
-    imm_random_prob = clamp_pct(std::atoi(s));
-
-  s = std::getenv("RV32_R_BASE");
-  if (s)
-    r_weight_base_alu = clamp_pct(std::atoi(s));
-
-  s = std::getenv("RV32_R_M");
-  if (s)
-    r_weight_m = clamp_pct(std::atoi(s));
-
-  s = std::getenv("MUTATOR_ISA");
-  if (s && *s)
-    isa_name = s;
+  // All configuration now comes from YAML file only.
+  // Environment variable overrides have been removed.
+  // This function is kept for backward compatibility but does nothing.
 }
 
 void Config::dumpToFile(const std::string &path) const {
