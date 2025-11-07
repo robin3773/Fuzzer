@@ -48,6 +48,7 @@ class ISAMutator : public MutatorInterface {
                               const isa::FieldEncoding &enc) const;
     void applyField(uint32_t &word, const isa::FieldEncoding &enc,
                     uint32_t value) const;
+    uint32_t readWord(const unsigned char *buf, size_t offset) const;
     void writeWord(unsigned char *buf, size_t offset, uint32_t word) const;
 
     struct Rule {

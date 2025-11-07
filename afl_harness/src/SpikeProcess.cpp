@@ -1,9 +1,11 @@
 #include "SpikeProcess.hpp"
+#include "SpikeExit.hpp"
 
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <exception>
 #include <regex>
 #include <sstream>
 #include <vector>
@@ -31,6 +33,8 @@ bool SpikeProcess::start(const std::string& spike_bin, const std::string& elf_pa
   start_error_.clear();
   pending_line_.clear();
   instr_index_ = 0;
+  fatal_trap_seen_ = false;
+  fatal_trap_summary_.clear();
   std::vector<std::string> args{"-l", "--isa=" + isa};
   if (!pk_bin.empty()) args.push_back(pk_bin);
   args.push_back(elf_path);
@@ -114,6 +118,37 @@ bool SpikeProcess::next_commit(CommitRec& rec) {
     }
     // try to match commit line
     std::smatch m;
+    static const std::regex trap_re(R"(core\s+\d+:\s+exception\s+([A-Za-z0-9_]+),\s+epc\s+0x([0-9a-fA-F]+))");
+    if (!fatal_trap_seen_) {
+      if (s.find("exception") != std::string::npos && s.find("core") != std::string::npos) {
+        if (log_file_) {
+          std::fwrite(s.data(), 1, s.size(), log_file_);
+          std::fflush(log_file_);
+        }
+        std::smatch trap_match;
+        if (std::regex_search(s, trap_match, trap_re)) {
+          std::string summary = trap_match[1].str();
+          summary += " at epc=0x";
+          summary += trap_match[2].str();
+          fatal_trap_summary_ = summary;
+        } else {
+          std::string summary = s;
+          while (!summary.empty() && (summary.back() == '\n' || summary.back() == '\r')) summary.pop_back();
+          fatal_trap_summary_ = summary;
+        }
+        fatal_trap_seen_ = true;
+        pending_line_.clear();
+        if (child_) {
+          try {
+            child_->terminate();
+          } catch (const std::exception &) {
+            // ignore terminate failures; wait() handles final status
+          }
+        }
+        stop();
+        return false;
+      }
+    }
     if (std::regex_search(s, m, commit_re_)) {
       // We'll accumulate the raw lines for this instruction to a chunk and emit with separators
       std::vector<std::string> chunk;

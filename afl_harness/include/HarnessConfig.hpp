@@ -16,7 +16,6 @@ struct HarnessConfig {
   int xlen = 32;       // 32 or 64
   unsigned max_cycles = 10000;
   bool stop_on_spike_done = true;
-  bool append_exit_stub = true;
   bool use_tohost = false;
   uint32_t tohost_addr = 0;
   unsigned pc_stagnation_limit = 512;
@@ -83,7 +82,6 @@ struct HarnessConfig {
     }
 
     stop_on_spike_done = parse_bool_env(std::getenv("STOP_ON_SPIKE_DONE"), true);
-    append_exit_stub = parse_bool_env(std::getenv("APPEND_EXIT_STUB"), true);
     pc_stagnation_limit = parse_unsigned_env(std::getenv("PC_STAGNATION_LIMIT"), pc_stagnation_limit);
     max_program_words = parse_unsigned_env(std::getenv("MAX_PROGRAM_WORDS"), max_program_words);
 
@@ -96,7 +94,6 @@ struct HarnessConfig {
     std::cout << "[INFO] Max program words: " << max_program_words << "\n";
     std::cout << "[INFO] PC stagnation limit: " << pc_stagnation_limit << "\n";
     std::cout << "[INFO] Stop on Spike completion: " << (stop_on_spike_done ? "yes" : "no") << "\n";
-    std::cout << "[INFO] Append exit stub: " << (append_exit_stub ? "yes" : "no") << "\n";
     if (use_tohost) {
       std::cout << "[INFO] tohost address: 0x" << std::hex << tohost_addr << std::dec << "\n";
     }

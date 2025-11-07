@@ -1,0 +1,83 @@
+# =============================================================================
+# EXIT_STUB Schema — Deterministic program termination for fuzzing
+# =============================================================================
+#
+# Purpose:
+#   Provide a clean, ISA-compliant end-of-stream marker for fuzzed programs.
+#   Prevents infinite loops and timeouts by writing to a magic MMIO address
+#   and issuing an EBREAK trap.
+#
+# Mechanism:
+#   1. Materialize TOHOST_ADDR in t0 using LUI + ADDI
+#   2. Load immediate 1 into t1
+#   3. Store t1 to [t0] (MMIO write to TOHOST_ADDR)
+#   4. Execute EBREAK
+#
+# Usage:
+#   - Mutator: Append EXIT_STUB sequence and lock last 5 instructions
+#   - Harness: Detect store to TOHOST_ADDR or EBREAK trap → clean exit
+#
+# =============================================================================
+
+include:
+  - ./rv32i.yaml
+
+constants:
+  # Magic MMIO address for clean exit signaling
+  # Must match TOHOST_ADDR in harness config
+  TOHOST_ADDR: 0x80001000
+
+macros:
+  # Sign-correct splitting for LUI+ADDI materialization of 32-bit addresses
+  # LUI takes upper 20 bits, but must round up if bit[11] is set
+  HI20: "((TOHOST_ADDR + 0x800) >> 12)"
+  # ADDI sign-extends its 12-bit immediate; adjust if we rounded up
+  LO12: "((TOHOST_ADDR & 0xFFF) - (((TOHOST_ADDR >> 11) & 1) * 0x1000))"
+
+pseudos:
+  EXIT_STUB:
+    description: "Write 1 to TOHOST_ADDR then EBREAK"
+    locked: true  # Prevent mutations from corrupting this sequence
+    sequence:
+      # t0 = TOHOST_ADDR (materialized via LUI + ADDI)
+      - op: LUI
+        rd: t0    # x5
+        imm20: HI20
+
+      - op: ADDI
+        rd: t0
+        rs1: t0
+        imm12: LO12
+
+      # t1 = 1 (exit code / marker value)
+      - op: ADDI
+        rd: t1    # x6
+        rs1: x0
+        imm12: 1
+
+      # Store t1 to [t0] (MMIO write triggers harness exit detection)
+      - op: SW
+        rs2: t1
+        rs1: t0
+        imm12: 0
+
+      # EBREAK: secondary stop signal (generates trap)
+      - op: EBREAK
+
+# =============================================================================
+# Integration notes:
+# =============================================================================
+# 1. Mutator must:
+#    - Always append EXIT_STUB after mutating payload
+#    - Call protect_tail(5) to prevent last 5 instructions from being mutated
+#    - Cap payload length to (MAX_INSNS - 5) to ensure stub fits
+#
+# 2. Harness must:
+#    - Watch for RVFI mem_wmask != 0 && mem_addr == TOHOST_ADDR → exit(0)
+#    - Watch for trap && mcause == EBREAK → exit(0)
+#    - Keep MAX_CYCLES and PC-stagnation watchdogs as backstops
+#
+# 3. Spike golden model:
+#    - Treats store to TOHOST_ADDR as normal RAM write (no special handling)
+#    - Stop lockstep when DUT signals "done" via MMIO write or EBREAK trap
+# =============================================================================

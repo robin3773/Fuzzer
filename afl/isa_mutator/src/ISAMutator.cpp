@@ -16,6 +16,7 @@
 #include <fuzz/mutator/CompressedMutator.hpp>
 #include <fuzz/mutator/DebugUtils.hpp>
 #include <fuzz/mutator/EncodeHelpers.hpp>
+#include <fuzz/mutator/ExitStub.hpp>
 #include <fuzz/mutator/LegalCheck.hpp>
 #include <fuzz/mutator/MutatorDebug.hpp>
 #include <fuzz/mutator/Random.hpp>
@@ -97,15 +98,42 @@ unsigned char *ISAMutator::mutateWithSchema(unsigned char *in, size_t in_len,
     return nullptr;
 
   size_t word_bytes = std::max<size_t>(1, word_bytes_);
-  size_t cap = max_size ? max_size : std::max(in_len, word_bytes);
-  cap = std::max(cap, word_bytes);
+  constexpr size_t exit_stub_bytes = exit_stub::EXIT_STUB_INSN_COUNT * 4;
+  constexpr size_t min_payload_insns = 16;
+  constexpr size_t max_payload_insns = 512;
+  constexpr size_t min_payload_bytes = min_payload_insns * 4;
+  constexpr size_t max_payload_bytes = max_payload_insns * 4;
+  
+  // Reserve space for exit stub + max payload
+  // NOTE: Ignore max_size if it's too small - we need room to generate proper programs
+  size_t required_min = min_payload_bytes + exit_stub_bytes;
+  size_t cap = (max_size && max_size >= required_min) ? max_size : (max_payload_bytes + exit_stub_bytes);
+  cap = std::max(cap, required_min);
 
   unsigned char *out = static_cast<unsigned char *>(std::malloc(cap));
   if (!out)
     return nullptr;
 
-  // Copy input or zero-initialize
-  size_t cur_len = std::min(in_len, cap);
+  // Copy input or zero-initialize (leave room for exit stub)
+  size_t payload_cap = std::min(cap - exit_stub_bytes, max_payload_bytes);
+  size_t cur_len = std::min(in_len, payload_cap);
+  
+  // Check if input already has exit stub at the end
+  bool has_exit_stub = false;
+  if (cur_len >= exit_stub_bytes && in) {
+    has_exit_stub = exit_stub::has_exit_stub(in + cur_len - exit_stub_bytes);
+  }
+  
+  // If input has exit stub, exclude it from mutation region
+  if (has_exit_stub) {
+    cur_len -= exit_stub_bytes;
+  }
+  
+  // Enforce maximum payload size (512 instructions)
+  if (cur_len > max_payload_bytes) {
+    cur_len = max_payload_bytes;
+  }
+  
   if (cur_len && in) {
     std::memcpy(out, in, cur_len);
   } else {
@@ -113,24 +141,117 @@ unsigned char *ISAMutator::mutateWithSchema(unsigned char *in, size_t in_len,
     cur_len = word_bytes;
   }
 
-  // Ensure minimum size
-  if (cur_len < word_bytes) {
-    std::memset(out + cur_len, 0, word_bytes - cur_len);
-    cur_len = word_bytes;
+  // Randomize initial payload size between min and max
+  size_t cur_insns = cur_len / word_bytes;
+  size_t target_insns;
+  
+  if (cur_len < min_payload_bytes) {
+    // Too small, pick random target size (full range 16-512)
+    uint32_t rand_offset = Random::range(static_cast<uint32_t>(max_payload_insns - min_payload_insns + 1));
+    target_insns = min_payload_insns + rand_offset;
+  } else if (cur_insns == min_payload_insns) {
+    // At minimum, ALWAYS grow (avoid staying at minimum)
+    size_t max_growth = max_payload_insns - cur_insns;
+    size_t growth = 1 + Random::range(static_cast<uint32_t>(max_growth));
+    target_insns = cur_insns + growth;
+  } else {
+    // Randomly adjust current size
+    uint32_t action = Random::range(10);  // 0-9 for finer control
+    if (action < 5 && cur_insns < max_payload_insns) {
+      // Grow: 50% chance
+      size_t max_growth = std::min<size_t>(max_payload_insns - cur_insns, 200);
+      size_t growth = Random::range(static_cast<uint32_t>(max_growth + 1));
+      target_insns = cur_insns + growth;
+    } else if (action >= 5 && action < 8 && cur_insns > min_payload_insns) {
+      // Shrink: 30% chance
+      size_t max_shrink = std::min<size_t>(cur_insns - min_payload_insns, 100);
+      size_t shrink = Random::range(static_cast<uint32_t>(max_shrink + 1));
+      target_insns = cur_insns - shrink;
+    } else {
+      // Keep current size: 20% chance
+      target_insns = cur_insns;
+    }
+  }
+  
+  size_t target_bytes = std::min(target_insns * word_bytes, payload_cap);
+  
+  // Adjust to target size
+  if (cur_len < target_bytes) {
+    // Grow by adding random instructions
+    while (cur_len < target_bytes && (cur_len + word_bytes) <= payload_cap) {
+      uint32_t encoded = encodeInstruction(pickInstruction());
+      writeWord(out, cur_len, encoded);
+      cur_len += word_bytes;
+    }
+  } else if (cur_len > target_bytes) {
+    // Shrink by truncating
+    cur_len = target_bytes;
   }
 
   size_t nwords = std::max<size_t>(1, cur_len / word_bytes);
-  unsigned nmuts = 1 + (Random::rnd32() % 3);
+  unsigned nmuts = 1 + (Random::rnd32() % 50);  // Increased from 20 to 50
   
+  // Apply mutations (ALL payload instructions can be mutated - stub appended after)
   for (unsigned i = 0; i < nmuts; ++i) {
-    size_t idx = Random::range(static_cast<uint32_t>(nwords));
-    uint32_t encoded = encodeInstruction(pickInstruction());
+    // Randomly choose mutation strategy (0=replace, 1=insert, 2=delete, 3=duplicate)
+    unsigned strategy = Random::rnd32() % 4;
     
-    if (!isa_.fields.empty() && !is_legal_instruction(encoded, isa_))
-      continue;
-    
-    writeWord(out, idx * word_bytes, encoded);
+    if (strategy == 0 && nwords > 0) {
+      // REPLACE: mutate existing instruction
+      size_t idx = Random::range(static_cast<uint32_t>(nwords));
+      
+      uint32_t encoded = encodeInstruction(pickInstruction());
+      
+      if (!isa_.fields.empty() && !is_legal_instruction(encoded, isa_))
+        continue;
+      
+      writeWord(out, idx * word_bytes, encoded);
+      
+    } else if (strategy == 1 && nwords < max_payload_insns && (cur_len + word_bytes + exit_stub_bytes <= cap)) {
+      // INSERT: add new instruction at random position (enforce max 512 instructions)
+      size_t idx = Random::range(static_cast<uint32_t>(nwords + 1));
+      
+      uint32_t encoded = encodeInstruction(pickInstruction());
+      
+      if (!isa_.fields.empty() && !is_legal_instruction(encoded, isa_))
+        continue;
+      
+      // Shift instructions after insertion point
+      std::memmove(out + (idx + 1) * word_bytes, out + idx * word_bytes, 
+                   cur_len - idx * word_bytes);
+      writeWord(out, idx * word_bytes, encoded);
+      cur_len += word_bytes;
+      nwords++;
+      
+    } else if (strategy == 2 && nwords > min_payload_insns) {
+      // DELETE: remove instruction at random position (enforce min 16 instructions)
+      size_t idx = Random::range(static_cast<uint32_t>(nwords));
+      
+      // Shift instructions after deletion point
+      std::memmove(out + idx * word_bytes, out + (idx + 1) * word_bytes,
+                   cur_len - (idx + 1) * word_bytes);
+      cur_len -= word_bytes;
+      nwords--;
+      
+    } else if (strategy == 3 && nwords < max_payload_insns && (cur_len + word_bytes + exit_stub_bytes <= cap) && nwords > 0) {
+      // DUPLICATE: copy existing instruction to new position (enforce max 512 instructions)
+      size_t src_idx = Random::range(static_cast<uint32_t>(nwords));
+      size_t dst_idx = Random::range(static_cast<uint32_t>(nwords + 1));
+      
+      uint32_t insn = readWord(out, src_idx * word_bytes);
+      
+      // Shift instructions after insertion point
+      std::memmove(out + (dst_idx + 1) * word_bytes, out + dst_idx * word_bytes,
+                   cur_len - dst_idx * word_bytes);
+      writeWord(out, dst_idx * word_bytes, insn);
+      cur_len += word_bytes;
+      nwords++;
+    }
   }
+
+  // Append exit stub after mutations
+  exit_stub::append_exit_stub(out, cur_len);
+  cur_len += exit_stub_bytes;
 
   last_len_ = cur_len;
   return out;
@@ -139,18 +260,31 @@ unsigned char *ISAMutator::mutateWithSchema(unsigned char *in, size_t in_len,
 unsigned char *ISAMutator::mutateFallback(unsigned char *in, size_t in_len,
                                              unsigned char *, size_t max_size) {
   FunctionTracer tracer(__FILE__, "ISAMutator::mutateFallback");
-  size_t cap = max_size ? max_size : std::max<size_t>(in_len, 1);
+  constexpr size_t exit_stub_bytes = exit_stub::EXIT_STUB_INSN_COUNT * 4;
+  constexpr size_t min_payload_bytes = 16 * 4;  // 16 instructions minimum
+  constexpr size_t max_payload_bytes = 512 * 4; // 512 instructions maximum
+  
+  size_t cap = max_size ? max_size : (max_payload_bytes + exit_stub_bytes);
+  cap = std::max(cap, min_payload_bytes + exit_stub_bytes);
   
   unsigned char *out = static_cast<unsigned char *>(std::malloc(cap));
   if (!out)
     return nullptr;
 
-  size_t cur_len = std::min(in_len, cap);
+  size_t payload_cap = cap - exit_stub_bytes;
+  size_t cur_len = std::min(in_len, payload_cap);
   if (cur_len && in) {
     std::memcpy(out, in, cur_len);
   } else {
     out[0] = 0;
     cur_len = 1;
+  }
+
+  // Ensure minimum payload size (16 instructions)
+  if (cur_len < min_payload_bytes) {
+    size_t bytes_needed = min_payload_bytes - cur_len;
+    std::memset(out + cur_len, 0, bytes_needed);
+    cur_len = min_payload_bytes;
   }
 
   uint32_t total_weight = 0;
@@ -166,13 +300,27 @@ unsigned char *ISAMutator::mutateFallback(unsigned char *in, size_t in_len,
     for (const auto &rule : rules_) {
       acc += rule.weight;
       if (pick < acc) {
-        applyRule(rule, out, cur_len, cap);
+        applyRule(rule, out, cur_len, payload_cap);
+        
+        // Enforce size limits after rule application
+        if (cur_len < min_payload_bytes) {
+          size_t bytes_needed = min_payload_bytes - cur_len;
+          std::memset(out + cur_len, 0, bytes_needed);
+          cur_len = min_payload_bytes;
+        } else if (cur_len > max_payload_bytes) {
+          cur_len = max_payload_bytes;
+        }
+        
         break;
       }
     }
   }
 
-  last_len_ = std::max<size_t>(cur_len, 1);
+  // Append exit stub after fallback mutations
+  exit_stub::append_exit_stub(out, cur_len);
+  cur_len += exit_stub_bytes;
+
+  last_len_ = cur_len;
   return out;
 }
 
@@ -275,6 +423,20 @@ void ISAMutator::applyField(uint32_t &word, const isa::FieldEncoding &enc, uint3
   }
   
   word = static_cast<uint32_t>(w);
+}
+
+uint32_t ISAMutator::readWord(const unsigned char *buf, size_t offset) const {
+  FunctionTracer tracer(__FILE__, "ISAMutator::readWord");
+  if (word_bytes_ == 2)
+    return internal::load_u16_le(buf, offset);
+  else if (word_bytes_ == 4)
+    return internal::load_u32_le(buf, offset);
+  else {
+    uint32_t word = 0;
+    for (uint32_t i = 0; i < word_bytes_ && i < 4; ++i)
+      word |= static_cast<uint32_t>(buf[offset + i]) << (8 * i);
+    return word;
+  }
 }
 
 void ISAMutator::writeWord(unsigned char *buf, size_t offset, uint32_t word) const {

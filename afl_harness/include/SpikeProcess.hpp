@@ -48,6 +48,8 @@ public:
   //   log_path(): returns the path previously set by set_log_path().
   const std::string& command() const { return spike_cmd_; }
   const std::string& log_path() const { return log_path_; }
+  bool saw_fatal_trap() const { return fatal_trap_seen_; }
+  const std::string& fatal_trap_summary() const { return fatal_trap_summary_; }
 
   // Process status helpers (valid after spike stops or start() failure)
   //   has_status(): true when the last run produced a wait status (after stop)
@@ -117,6 +119,8 @@ private:
   // Path to the raw log file (if set) and its FILE* handle.
   std::string log_path_;
   FILE* log_file_ = nullptr;
+  bool fatal_trap_seen_ = false;
+  std::string fatal_trap_summary_;
   // Regexes to detect commit lines and register writes in Spike logs.
   std::regex commit_re_;
   std::regex reg_write_re_;

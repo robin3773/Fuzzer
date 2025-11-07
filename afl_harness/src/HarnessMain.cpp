@@ -4,6 +4,7 @@
 #include "CrashLogger.hpp"
 #include "Trace.hpp"
 #include "SpikeProcess.hpp"
+#include "DutExit.hpp"
 
 #include "verilated.h"
 #include <hwfuzz/Log.hpp>
@@ -99,118 +100,6 @@ static void read_all_fd(int fd, std::vector<unsigned char>& out, size_t cap=1<<2
 }
 
 extern "C" CpuIface* make_cpu();
-
-enum class ExitReason {
-  None,
-  Finish,
-  Tohost,
-  Ecall,
-  SpikeDone
-};
-
-static const char* exit_reason_text(ExitReason r) {
-  switch (r) {
-    case ExitReason::Finish:   return "dut_finish";
-    case ExitReason::Tohost:   return "tohost";
-    case ExitReason::Ecall:    return "ecall";
-    case ExitReason::SpikeDone:return "spike_done";
-    default:                   return "none";
-  }
-}
-
-static void append_word_le(std::vector<unsigned char>& buf, uint32_t word) {
-  buf.push_back(static_cast<unsigned char>(word & 0xFFu));
-  buf.push_back(static_cast<unsigned char>((word >> 8) & 0xFFu));
-  buf.push_back(static_cast<unsigned char>((word >> 16) & 0xFFu));
-  buf.push_back(static_cast<unsigned char>((word >> 24) & 0xFFu));
-}
-
-static uint32_t encode_lui(uint32_t rd, uint32_t upper20) {
-  return (upper20 << 12) | (rd << 7) | 0x37u;
-}
-
-static uint32_t encode_addi(uint32_t rd, uint32_t rs1, int32_t imm12) {
-  uint32_t uimm = static_cast<uint32_t>(imm12) & 0xFFFu;
-  return (uimm << 20) | (rs1 << 15) | (0x0u << 12) | (rd << 7) | 0x13u;
-}
-
-static uint32_t encode_sw(uint32_t rs2, uint32_t rs1, int32_t imm12) {
-  uint32_t uimm = static_cast<uint32_t>(imm12) & 0xFFFu;
-  uint32_t imm_lo = uimm & 0x1Fu;
-  uint32_t imm_hi = (uimm >> 5) & 0x7Fu;
-  return (imm_hi << 25) | (rs2 << 20) | (rs1 << 15) | (0x2u << 12) | (imm_lo << 7) | 0x23u;
-}
-
-static size_t exit_stub_word_count(const HarnessConfig& cfg) {
-  if (!cfg.append_exit_stub) return 0;
-  return cfg.use_tohost ? 5u : 1u;
-}
-
-static void apply_program_envelope(std::vector<unsigned char>& input, const HarnessConfig& cfg) {
-  const uint32_t nop_word = 0x00000013u;
-  const size_t stub_words = exit_stub_word_count(cfg);
-  const size_t max_words_cfg = cfg.max_program_words;
-  size_t payload_limit = std::numeric_limits<size_t>::max();
-  if (max_words_cfg > 0) {
-    if (max_words_cfg <= stub_words) {
-      payload_limit = 0;
-    } else {
-      payload_limit = max_words_cfg - stub_words;
-    }
-  }
-
-  size_t original_words = (input.size() + 3u) / 4u;
-  if (payload_limit != std::numeric_limits<size_t>::max() && original_words > payload_limit) {
-    std::fprintf(hwfuzz::harness_log(),
-                "[HYBRID] Trimming program from %zu to %zu words to honor MAX_PROGRAM_WORDS.\n",
-                original_words, payload_limit);
-    original_words = payload_limit;
-    input.resize(original_words * 4u);
-  }
-
-  // Pad any partial trailing bytes with NOPs to keep instruction alignment
-  size_t remainder = input.size() % 4u;
-  if (remainder != 0) {
-    size_t need = 4u - remainder;
-    for (size_t i = 0; i < need; ++i) {
-      input.push_back(static_cast<unsigned char>((nop_word >> (8 * i)) & 0xFFu));
-    }
-    original_words = (input.size() + 3u) / 4u;
-  }
-
-  if (cfg.append_exit_stub) {
-    if (cfg.use_tohost) {
-      uint32_t hi = (cfg.tohost_addr + 0x800u) >> 12;
-      int32_t lo = static_cast<int32_t>(static_cast<int64_t>(cfg.tohost_addr) - (static_cast<int64_t>(hi) << 12));
-      append_word_le(input, encode_lui(5u, hi));
-      append_word_le(input, encode_addi(5u, 5u, lo));
-      append_word_le(input, encode_addi(6u, 0u, 1));
-      append_word_le(input, encode_sw(6u, 5u, 0));
-      std::fprintf(hwfuzz::harness_log(), "[HYBRID] Appended tohost exit stub (addr=0x%08x).\n", cfg.tohost_addr);
-    } else {
-      std::fprintf(hwfuzz::harness_log(), "[HYBRID] Appended ECALL exit stub.\n");
-    }
-    append_word_le(input, 0x00000073u); // ECALL
-
-    if (max_words_cfg > 0) {
-      size_t total_words = (input.size() + 3u) / 4u;
-      if (total_words > max_words_cfg) {
-        // Drop excess payload words (should be rare if trimming worked)
-        size_t desired_bytes = max_words_cfg * 4u;
-        if (desired_bytes < input.size()) {
-          std::fprintf(hwfuzz::harness_log(),
-                      "[HYBRID] Trimming payload to keep total words within %zu (including stub).\n",
-                      max_words_cfg);
-          input.resize(desired_bytes);
-        }
-      }
-    }
-  }
-
-  if (input.empty()) {
-    append_word_le(input, nop_word);
-  }
-}
 
 static void redirect_stdio_to_log() {
   const char* log_path = std::getenv("HARNESS_STDIO_LOG");
@@ -370,7 +259,6 @@ int main(int argc, char** argv) {
 
   CpuIface* cpu = make_cpu();
   cpu->reset();
-  apply_program_envelope(input, cfg);
   cpu->load_input(input);
 
   CrashLogger logger(cfg);
@@ -585,6 +473,12 @@ int main(int argc, char** argv) {
 
     cpu->step();
 
+    if (cpu->got_finish()) {
+      exit_reason = ExitReason::Finish;
+      graceful_exit = true;
+      break;
+    }
+
     // On commit: record a trace row (if enabled) and optionally compare to golden
     if (cpu->rvfi_valid()) {
       CommitRec rec;
@@ -598,6 +492,37 @@ int main(int argc, char** argv) {
       rec.mem_wmask = cpu->rvfi_mem_wmask();
       rec.trap      = cpu->trap() ? 1u : 0u;
       tracer.write(rec);
+
+      if (stagnation_limit > 0) {
+        if (last_progress_valid && rec.pc_w == last_progress_pc) {
+          if (++stagnation_count > stagnation_limit) {
+            std::ostringstream oss;
+            oss << "PC stagnation detected after " << stagnation_count << " commits at PC=0x"
+                << std::hex << rec.pc_w << std::dec << "\n";
+            oss << "Last instruction: 0x" << std::hex << rec.insn << std::dec << "\n";
+            logger.writeCrashDetailed("pc_stagnation", rec.pc_r, rec.insn, cyc, input, oss.str());
+            _exit(127);
+          }
+        } else {
+          last_progress_pc = rec.pc_w;
+          last_progress_valid = true;
+          stagnation_count = 0;
+        }
+      }
+
+      // Detect tohost writes or ECALL-triggered exits
+      if (cfg.use_tohost && (rec.mem_wmask & 0xF) != 0) {
+        if ((rec.mem_addr & ~0x3u) == (cfg.tohost_addr & ~0x3u)) {
+          exit_reason = ExitReason::Tohost;
+          graceful_exit = true;
+          break;
+        }
+      }
+      if (rec.trap) {
+        exit_reason = ExitReason::Ecall;
+        graceful_exit = true;
+        break;
+      }
 
       // Update DUT shadow regfile
       if (rec.rd_addr != 0) dut_regs[rec.rd_addr] = rec.rd_wdata;
@@ -706,12 +631,28 @@ int main(int argc, char** argv) {
               logger.writeCrashDetailed("golden_divergence_csr_mcycle", rec.pc_r, rec.insn, cyc, input, oss.str());
               _exit(123);
             }
+
           } else {
+            if (cfg.stop_on_spike_done && spike.has_status() && spike.exited() && spike.exit_code() == 0) {
+              exit_reason = ExitReason::SpikeDone;
+              graceful_exit = true;
+              break;
+            }
             // Spike ended or errored: report and disable golden checks
             golden_ready = false;
-            std::fprintf(hwfuzz::harness_log(),
-                         "[HARNESS/GOLDEN] Spike stopped producing commits; disabling golden checks.\n  Command: %s\n  ELF: %s\n",
-                         spike.command().c_str(), tmp_elf.empty()?"<unknown>":tmp_elf.c_str());
+            if (spike.saw_fatal_trap()) {
+              const std::string& trap = spike.fatal_trap_summary();
+              std::fprintf(hwfuzz::harness_log(),
+                           "[HARNESS/GOLDEN] Spike aborted on fatal trap (%s); disabling golden checks.\n  Command: %s\n  ELF: %s\n  Status: %s\n",
+                           trap.empty()?"unknown":trap.c_str(),
+                           spike.command().c_str(),
+                           tmp_elf.empty()?"<unknown>":tmp_elf.c_str(),
+                           spike.status_string().c_str());
+            } else {
+              std::fprintf(hwfuzz::harness_log(),
+                           "[HARNESS/GOLDEN] Spike stopped producing commits; disabling golden checks.\n  Command: %s\n  ELF: %s\n",
+                           spike.command().c_str(), tmp_elf.empty()?"<unknown>":tmp_elf.c_str());
+            }
             if (spike_log_env && *spike_log_env) {
               std::fprintf(hwfuzz::harness_log(), "  See Spike log: %s\n", spike_log_env);
               print_file_tail(spike_log_env, 60);
@@ -732,6 +673,16 @@ int main(int argc, char** argv) {
       logger.writeCrash("trap", pc, insn, cyc, input);
       _exit(124);
     }
+  }
+
+  if (graceful_exit) {
+    if (use_golden) {
+      spike.stop();
+    }
+    std::fprintf(hwfuzz::harness_log(),
+                 "[HYBRID] Graceful termination after %u cycles (reason=%s).\n",
+                 cyc, exit_reason_text(exit_reason));
+    _exit(0);
   }
 
   if (cyc >= cfg.max_cycles) {
