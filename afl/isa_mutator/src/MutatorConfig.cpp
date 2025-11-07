@@ -7,7 +7,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
-#include <hwfuzz/Log.hpp>
+#include <fuzz/Debug.hpp>
 #include <stdexcept>
 #include <string>
 
@@ -197,110 +197,26 @@ bool Config::loadFromFile(const std::string &path) {
   return true;
 }
 
-void Config::applyEnvironment() {
-  // All configuration now comes from YAML file only.
-  // Environment variable overrides have been removed.
-  // This function is kept for backward compatibility but does nothing.
-}
-
-void Config::dumpToFile(const std::string &path) const {
-  if (path.empty())
-    return;
-
-  namespace fs = std::filesystem;
-  fs::path target(path);
-  std::error_code ec;
-  if (!target.parent_path().empty()) {
-    fs::create_directories(target.parent_path(), ec);
-    if (ec)
-      throw std::runtime_error("Failed to create directory for effective config dump: " +
-                               target.parent_path().string());
-  }
-
-  YAML::Emitter out;
-  out << YAML::BeginMap;
-  out << YAML::Key << "strategy" << YAML::Value << strategy_to_string(strategy);
-  out << YAML::Key << "verbose" << YAML::Value << verbose;
-  out << YAML::Key << "enable_c" << YAML::Value << enable_c;
-
-  out << YAML::Key << "probabilities" << YAML::Value;
-  out << YAML::BeginMap;
-  out << YAML::Key << "decode" << YAML::Value << static_cast<int>(decode_prob);
-  out << YAML::Key << "imm_random" << YAML::Value << static_cast<int>(imm_random_prob);
-  out << YAML::EndMap;
-
-  out << YAML::Key << "weights" << YAML::Value;
-  out << YAML::BeginMap;
-  out << YAML::Key << "r_base_alu" << YAML::Value << static_cast<int>(r_weight_base_alu);
-  out << YAML::Key << "r_m" << YAML::Value << static_cast<int>(r_weight_m);
-  out << YAML::EndMap;
-
-  out << YAML::Key << "schemas" << YAML::Value;
-  out << YAML::BeginMap;
-  out << YAML::Key << "isa_name" << YAML::Value << isa_name;
-  out << YAML::EndMap;
-
-  out << YAML::EndMap;
-
-  if (!out.good())
-    throw std::runtime_error("Failed to encode effective config to YAML emitter");
-
-  std::ofstream ofs(target);
-  if (!ofs.is_open())
-    throw std::runtime_error("Failed to open path for effective config dump: " + target.string());
-  ofs << out.c_str() << '\n';
-  if (!ofs.good())
-    throw std::runtime_error("Failed to write effective config to " + target.string());
-}
-
-Config loadConfigFromEnvOrDie() {
-  // Get config path from environment variable
+Config loadConfigFromEnv() {
   const char *env_path = std::getenv("MUTATOR_CONFIG");
-  if (!env_path) {
-  std::fprintf(hwfuzz::harness_log(), "[ERROR] MUTATOR_CONFIG environment variable not set\n");
-    std::exit(1);
-  }
-  std::string config_path = env_path;
-  
-  // Check if config file can be opened
-  std::ifstream test_file(config_path);
-  if (!test_file.is_open()) {
-  std::fprintf(hwfuzz::harness_log(), "[ERROR] Cannot open config file: %s\n", config_path.c_str());
-    std::exit(1);
-  }
-  test_file.close();
-  std::fprintf(hwfuzz::harness_log(), "[INFO] Config file opened successfully: %s\n", config_path.c_str());
-  
-  // Load config
   Config cfg;
-  try {
-    if (!cfg.loadFromFile(config_path)) {
-  std::fprintf(hwfuzz::harness_log(), "[ERROR] Failed to load config: %s\n", config_path.c_str());
-      std::exit(1);
-    }
-  } catch (const std::exception &ex) {
-  std::fprintf(hwfuzz::harness_log(), "[ERROR] Config load error: %s\n", ex.what());
-    std::exit(1);
-  }
-  std::fprintf(hwfuzz::harness_log(), "[INFO] Loaded config: %s\n", config_path.c_str());
-  
-  // Apply environment overrides
-  cfg.applyEnvironment();
-  
+  cfg.loadFromFile(env_path);
+  fuzz::debug::logInfo("Loaded config: %s\n", env_path);
   return cfg;
 }
 
 void showConfig(const Config &cfg) {
-  std::fprintf(hwfuzz::harness_log(),
-               "[INFO] strategy=%s verbose=%s enable_c=%s decode_prob=%u imm_random_prob=%u r_weight_base_alu=%u r_weight_m=%u isa_name=%s\n",
-               strategy_to_string(cfg.strategy),
-               cfg.verbose ? "true" : "false",
-               cfg.enable_c ? "true" : "false",
-               cfg.decode_prob,
-               cfg.imm_random_prob,
-               cfg.r_weight_base_alu,
-               cfg.r_weight_m,
-               cfg.isa_name.c_str());
+  fuzz::debug::logInfo(
+      "strategy=%s verbose=%s enable_c=%s decode_prob=%u imm_random_prob=%u "
+      "r_weight_base_alu=%u r_weight_m=%u isa_name=%s\n",
+      strategy_to_string(cfg.strategy),
+      cfg.verbose ? "true" : "false",
+      cfg.enable_c ? "true" : "false",
+      cfg.decode_prob,
+      cfg.imm_random_prob,
+      cfg.r_weight_base_alu,
+      cfg.r_weight_m,
+      cfg.isa_name.c_str());
 }
 
 } // namespace fuzz::mutator

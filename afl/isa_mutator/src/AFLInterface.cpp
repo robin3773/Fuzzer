@@ -88,7 +88,7 @@ const char *mutator_get_active_strategy() {
 }
 
 void afl_custom_deinit(void) {
-  std::fprintf(hwfuzz::harness_log(), "[mutator] deinit\n");
+  std::fprintf(hwfuzz::harness_log(), "[] deinit\n");
   MutatorDebug::deinit();
 }
 

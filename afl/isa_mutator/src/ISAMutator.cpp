@@ -53,7 +53,7 @@ void ISAMutator::initFromEnv() {
   FunctionTracer tracer(__FILE__, "ISAMutator::initFromEnv");
   
   // Load config from environment
-  cfg_ = loadConfigFromEnvOrDie();
+  cfg_ = loadConfigFromEnv();
   
   MutatorDebug::init_from_env();
   logConfigSnapshot(cfg_);

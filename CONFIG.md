@@ -77,7 +77,7 @@ GOLDEN_MODE=off ./run.sh
 |----------|---------|-------------|
 | `MUTATOR_CONFIG` | `afl/isa_mutator/config/mutator.default.yaml` | Mutator YAML config file |
 | `SCHEMA_DIR` | `schemas` | ISA schema directory |
-| `DEBUG_MUTATOR` | `0` | Master debug switch: enables all logging, function tracing, and debug file output |
+| `DEBUG` | `0` | Master debug switch: enables all logging to `afl/isa_mutator/logs/mutator_debug.log` |
 
 **Note**: Mutation strategy, compressed instructions, probabilities, and weights are now configured in the YAML file specified by `MUTATOR_CONFIG`, not via environment variables.
 
@@ -109,7 +109,7 @@ GOLDEN_MODE=off ./run.sh
 | `TRACE_MODE` | `on` | Enable per-commit trace writing |
 | `EXEC_BACKEND` | `verilator` | Execution backend (verilator only for now) |
 
-**Note**: The harness automatically redirects all stdout/stderr to `logs/harness.log` to keep AFL++ stdio clean. Use `DEBUG_MUTATOR=1` for verbose debug output.
+**Note**: The harness automatically redirects all stdout/stderr to `logs/harness.log` to keep AFL++ stdio clean. Use `DEBUG=1` for verbose debug output to `afl/isa_mutator/logs/mutator_debug.log`.
 
 ### Exit Stub
 | Variable | Default | Description |
@@ -165,9 +165,11 @@ source deep_verify.env
 ### Debug mode (verbose logging)
 ```bash
 source fuzzer.env
-export DEBUG_MUTATOR="1"
-export FUZZER_QUIET="0"
-./run.sh --debug --cores 1
+export DEBUG="1"
+./run.sh --cores 1
+
+# View logs in another terminal
+tail -f afl/isa_mutator/logs/mutator_debug.log
 ```
 
 ## File Locations

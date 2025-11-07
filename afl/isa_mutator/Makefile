@@ -48,6 +48,7 @@ SOURCES = \
   $(SRC_DIR)/IsaLoader.cpp \
   $(SRC_DIR)/AFLInterface.cpp \
   $(SRC_DIR)/DebugUtils.cpp \
+  $(SRC_DIR)/Debug.cpp \
   $(SRC_DIR)/ISAMutator.cpp \
   $(SRC_DIR)/LegalCheck.cpp \
   $(SRC_DIR)/CompressedMutator.cpp
