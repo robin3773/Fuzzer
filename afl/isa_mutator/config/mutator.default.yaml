@@ -1,7 +1,6 @@
 # Default runtime settings mirroring historical in-code behaviour.
 strategy: IR
-verbose: true
-enable_c: false
+verbose: false
 
 probabilities:
   decode: 60

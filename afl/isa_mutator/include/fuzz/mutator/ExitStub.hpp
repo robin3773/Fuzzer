@@ -1,54 +1,83 @@
+/**
+ * @file ExitStub.hpp
+ * @brief RV32I exit stub encoder for clean program termination
+ * 
+ * This file provides encoding functions for the 5-instruction exit stub
+ * sequence that is automatically appended to every fuzzed program.
+ * The exit stub ensures programs terminate cleanly via MMIO write
+ * to TOHOST_ADDR followed by an EBREAK instruction.
+ * 
+ * @details
+ * Exit stub sequence (20 bytes):
+ * @code
+ *   lui  t0, hi20(TOHOST_ADDR)   // Load TOHOST_ADDR upper bits
+ *   addi t0, t0, lo12(TOHOST_ADDR) // Add lower bits (sign-corrected)
+ *   addi t1, x0, 1                 // Load exit code (1)
+ *   sw   t1, 0(t0)                 // Write to TOHOST_ADDR
+ *   ebreak                         // Trigger breakpoint/trap
+ * @endcode
+ * 
+ * @note TOHOST_ADDR must match the harness configuration (default: 0x80001000)
+ * @see append_exit_stub()
+ * @see has_exit_stub()
+ * @see is_tail_locked()
+ */
+
 #pragma once
 
 #include <cstdint>
 
 namespace fuzz::mutator {
 
-// =============================================================================
-// RV32I Exit Stub Encoder
-// =============================================================================
-//
-// Provides encoding functions for the 5-instruction exit stub sequence that
-// the mutator appends to every fuzzed program.
-//
-// Exit stub sequence:
-//   lui  t0, hi20(TOHOST_ADDR)
-//   addi t0, t0, lo12(TOHOST_ADDR)
-//   addi t1, x0, 1
-//   sw   t1, 0(t0)
-//   ebreak
-//
-// Usage:
-//   After mutation completes, call append_exit_stub() to add the sequence.
-//
-// =============================================================================
-
 namespace exit_stub {
 
-// Magic MMIO address for clean exit signaling (must match harness config)
+/// Magic MMIO address for clean exit signaling (must match harness config)
 constexpr uint32_t TOHOST_ADDR = 0x80001000;
 
-// Number of 32-bit instructions in exit stub
+/// Number of 32-bit instructions in exit stub sequence
 constexpr size_t EXIT_STUB_INSN_COUNT = 5;
 
-// RV32I instruction encoders
+/**
+ * @namespace rv32i
+ * @brief RV32I instruction encoders for exit stub generation
+ */
 namespace rv32i {
 
-/// Encode LUI (Load Upper Immediate)
-/// Opcode: 0b0110111, Format: U-type
+/**
+ * @brief Encode LUI (Load Upper Immediate) instruction
+ * @param rd Destination register (0-31)
+ * @param upper20 Upper 20 bits of immediate value
+ * @return Encoded 32-bit LUI instruction
+ * 
+ * Format: U-type, Opcode: 0b0110111
+ */
 inline uint32_t encode_lui(uint32_t rd, uint32_t upper20) {
   return (upper20 << 12) | (rd << 7) | 0x37u;
 }
 
-/// Encode ADDI (Add Immediate)
-/// Opcode: 0b0010011, funct3: 0b000, Format: I-type
+/**
+ * @brief Encode ADDI (Add Immediate) instruction
+ * @param rd Destination register (0-31)
+ * @param rs1 Source register (0-31)
+ * @param imm12 12-bit signed immediate value
+ * @return Encoded 32-bit ADDI instruction
+ * 
+ * Format: I-type, Opcode: 0b0010011, funct3: 0b000
+ */
 inline uint32_t encode_addi(uint32_t rd, uint32_t rs1, int32_t imm12) {
   uint32_t uimm = static_cast<uint32_t>(imm12) & 0xFFFu;
   return (uimm << 20) | (rs1 << 15) | (0x0u << 12) | (rd << 7) | 0x13u;
 }
 
-/// Encode SW (Store Word)
-/// Opcode: 0b0100011, funct3: 0b010, Format: S-type
+/**
+ * @brief Encode SW (Store Word) instruction
+ * @param rs2 Source register containing value to store (0-31)
+ * @param rs1 Base address register (0-31)
+ * @param imm12 12-bit signed offset
+ * @return Encoded 32-bit SW instruction
+ * 
+ * Format: S-type, Opcode: 0b0100011, funct3: 0b010
+ */
 inline uint32_t encode_sw(uint32_t rs2, uint32_t rs1, int32_t imm12) {
   uint32_t uimm = static_cast<uint32_t>(imm12) & 0xFFFu;
   uint32_t imm_lo = uimm & 0x1Fu;
@@ -56,12 +85,21 @@ inline uint32_t encode_sw(uint32_t rs2, uint32_t rs1, int32_t imm12) {
   return (imm_hi << 25) | (rs2 << 20) | (rs1 << 15) | (0x2u << 12) | (imm_lo << 7) | 0x23u;
 }
 
-/// EBREAK instruction (fixed encoding)
+/// EBREAK instruction (fixed encoding: 0x00100073)
 constexpr uint32_t EBREAK = 0x00100073u;
 
 } // namespace rv32i
 
-/// Split 32-bit address into LUI upper20 and ADDI lower12 (sign-correct)
+/**
+ * @brief Split 32-bit address into LUI upper20 and ADDI lower12
+ * 
+ * Performs sign-correct splitting to account for ADDI sign-extension.
+ * If bit[11] is set, the upper 20 bits are rounded up.
+ * 
+ * @param addr Full 32-bit address
+ * @param hi20 Output: upper 20 bits for LUI
+ * @param lo12 Output: signed 12-bit offset for ADDI
+ */
 inline void split_address(uint32_t addr, uint32_t& hi20, int32_t& lo12) {
   // Round up if bit[11] is set (to account for sign-extension in ADDI)
   hi20 = (addr + 0x800u) >> 12;
@@ -71,10 +109,16 @@ inline void split_address(uint32_t addr, uint32_t& hi20, int32_t& lo12) {
   lo12 = static_cast<int32_t>(static_cast<int64_t>(addr) - base);
 }
 
-/// Append 5-instruction exit stub to buffer
-/// @param buf Output buffer (must have space for 5 words = 20 bytes)
-/// @param offset Byte offset where stub should be written
-/// @param tohost_addr Magic MMIO address (default: TOHOST_ADDR)
+/**
+ * @brief Append 5-instruction exit stub to buffer
+ * 
+ * Writes the complete exit stub sequence at the specified offset.
+ * The sequence materializes TOHOST_ADDR, writes 1 to it, and executes EBREAK.
+ * 
+ * @param buf Output buffer (must have space for 5 words = 20 bytes from offset)
+ * @param offset Byte offset where stub should be written
+ * @param tohost_addr Magic MMIO address for exit detection (default: TOHOST_ADDR)
+ */
 inline void append_exit_stub(unsigned char* buf, size_t offset, uint32_t tohost_addr = TOHOST_ADDR) {
   // Split address for LUI + ADDI materialization
   uint32_t hi20;

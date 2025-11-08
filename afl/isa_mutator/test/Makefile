@@ -19,8 +19,8 @@ INPUT   ?= ../../../seeds/firmware.bin
 OBJDUMP ?= /opt/riscv/riscv32-unknown-elf/bin/objdump
 
 # Environment variables for mutator
+PROJECT_ROOT   ?= $(ROOT_DIR)/../..
 MUTATOR_CONFIG ?= $(ROOT_DIR)/config/mutator.default.yaml
-SCHEMA_DIR     ?= $(ROOT_DIR)/../../schemas
 DEBUG_MUTATOR  ?=
 
 all: $(TEST_BIN)
@@ -35,8 +35,8 @@ run: $(TEST_BIN)
 		exit 1; \
 	fi
 	@echo "[+] Running mutator self-test..."
+	PROJECT_ROOT=$(PROJECT_ROOT) \
 	MUTATOR_CONFIG=$(MUTATOR_CONFIG) \
-	SCHEMA_DIR=$(SCHEMA_DIR) \
 	$(if $(DEBUG_MUTATOR),DEBUG_MUTATOR=$(DEBUG_MUTATOR),) \
 	OBJDUMP=$(OBJDUMP) ./$(TEST_BIN) \
 		--lib $(MUTATOR_SO) \

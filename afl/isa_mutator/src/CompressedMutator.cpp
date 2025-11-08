@@ -9,8 +9,8 @@ void CompressedMutator::mutateAt(unsigned char *buf,
                                  size_t byte_index,
                                  size_t buf_size,
                                  const Config &cfg) {
-  if (!cfg.enable_c)
-    return;
+  (void)cfg; // Unused, kept for API compatibility
+  
   if (byte_index + 1 >= buf_size)
     return;
 

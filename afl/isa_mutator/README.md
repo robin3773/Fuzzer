@@ -22,20 +22,19 @@ afl/isa_mutator/
 │   └── mutator/                     # Mutation Engine
 │       ├── AFLInterface.hpp         # AFL++ custom mutator API
 │       ├── CompressedMutator.hpp    # RVC (compressed) instruction mutations
-│       ├── DebugUtils.hpp           # Function tracing and debug helpers
+│       ├── DebugUtils.hpp           # Unified debug system (function tracing + event logging)
 │       ├── EncodeHelpers.hpp        # Instruction encoding utilities
 │       ├── ExitStub.hpp             # Exit stub generation (LUI/ADDI/SW/EBREAK)
 │       ├── ISAMutator.hpp           # Main mutation engine
 │       ├── LegalCheck.hpp           # Instruction legality validation
 │       ├── MutatorConfig.hpp        # Configuration loading and management
-│       ├── MutatorDebug.hpp         # Debug logging system
 │       ├── MutatorInterface.hpp     # Core mutator interface
 │       └── Random.hpp               # Random number generation
 │
 ├── src/                             # Implementation Files
 │   ├── AFLInterface.cpp             # AFL++ hooks (afl_custom_init, afl_custom_fuzz, etc.)
 │   ├── CompressedMutator.cpp        # RVC mutation implementations
-│   ├── DebugUtils.cpp               # Debug tracing implementation
+│   ├── Debug.cpp                    # Debug utilities implementation
 │   ├── IsaLoader.cpp                # YAML ISA schema loading
 │   ├── ISAMutator.cpp               # Core mutation logic (REPLACE/INSERT/DELETE/DUPLICATE)
 │   ├── LegalCheck.cpp               # Instruction validation rules
@@ -133,14 +132,19 @@ CompressedMutator.cpp/hpp
 
 ### 5. Debug & Utilities
 ```
-MutatorDebug.hpp
-├── init_from_env()  - Read DEBUG_MUTATOR env var
-├── log_illegal()    - Track illegal mutations
-└── State: enabled, log_to_file, fp
+DebugUtils.hpp (header-only)
+├── init_from_env()      - Initialize debug system (reads DEBUG env var)
+├── deinit()             - Cleanup (close log file)
+├── FunctionTracer       - RAII function entry/exit logging
+├── log_message()        - Generic debug message logging
+├── log_illegal()        - Track illegal mutations
+└── MUTDBG_ILLEGAL()     - Macro for illegal mutation logging
 
-DebugUtils.cpp / DebugUtils.hpp
-├── FunctionTracer   - RAII function entry/exit logging
-└── is_debug_enabled() - Check debug state
+State Management:
+├── enabled              - Debug enabled flag
+├── log_to_file          - File logging enabled
+├── path                 - Log file path (PROJECT_ROOT/workdir/logs/mutator_debug.log)
+└── fp                   - Log file handle
 
 EncodeHelpers.hpp
 ├── encode_r_type()  - R-type instruction encoder
@@ -188,7 +192,8 @@ AFL++ Fuzzer
 - `fuzz/mutator/Random.hpp` — xorshift-based RNG shared by mutator components.
 - `fuzz/mutator/LegalCheck.hpp` — structural checks against ISA constraints.
 - `fuzz/mutator/MutatorInterface.hpp` — AFL-facing wrapper helpers.
-- `fuzz/mutator/MutatorDebug.hpp` — opt-in logging utilities.
+- `fuzz/mutator/DebugUtils.hpp` — unified debug system (function tracing + event logging).
+- `fuzz/mutator/ExitStub.hpp` — exit stub generation and encoding utilities.
 - `fuzz/isa/IsaLoader.hpp` — YAML loader for ISA schema files.
 
 ### src/
@@ -197,7 +202,7 @@ AFL++ Fuzzer
 - `AFLInterface.cpp` — hooks exported to AFL++ (`afl_custom_*` symbols).
 - `Random.cpp`, `LegalCheck.cpp` — shared utilities backing the mutator.
 - `CompressedMutator.cpp` — conservative mutations for RVC lanes.
-- `encode_helpers.hpp` — parsing helpers for schema patterns.
+- `Debug.cpp` — debug utility implementations.
 
 ### test/
 - `mutator_selftest.cpp` — standalone harness that loads the shared object and prints disassembly diffs.
@@ -210,11 +215,63 @@ make
 # produces: libisa_mutator.so
 ```
 
+## Environment Variables
+
+The mutator requires the following environment variables:
+
+### Required
+- **`PROJECT_ROOT`**: Absolute path to project root directory
+  - All paths are resolved relative to this (e.g., schemas at `$PROJECT_ROOT/schemas`)
+  - Example: `/home/user/HAVEN/Fuzz`
+
+### Optional
+- **`MUTATOR_CONFIG`**: Path to mutator configuration YAML (default: `config/mutator.default.yaml`)
+  - Defines mutation strategy, probabilities, and ISA selection
+- **`DEBUG`**: Set to `1` to enable debug logging
+  - Logs written to `afl/isa_mutator/logs/mutator_debug.log` (relative to CWD)
+
+### Example
+```bash
+export PROJECT_ROOT=/home/user/HAVEN/Fuzz
+export MUTATOR_CONFIG=$PROJECT_ROOT/afl/isa_mutator/config/mutator.default.yaml
+export DEBUG=1  # Optional: enable debug output
+```
+
 ## Use with AFL++ (example)
 ```bash
-AFL_CUSTOM_MUTATOR_LIBRARY=./afl/isa_mutator/libisa_mutator.so \
-MUTATOR_CONFIG=./afl/isa_mutator/config/mutator.default.yaml \
-afl-fuzz -i afl/seeds -o afl/corpora -- ./afl/afl_picorv32 @@
+PROJECT_ROOT=/home/user/HAVEN/Fuzz \
+MUTATOR_CONFIG=/home/user/HAVEN/Fuzz/afl/isa_mutator/config/mutator.default.yaml \
+AFL_CUSTOM_MUTATOR_LIBRARY=/home/user/HAVEN/Fuzz/afl/isa_mutator/libisa_mutator.so \
+afl-fuzz -i seeds -o corpora -- ./afl_harness/afl_picorv32 @@
+```
+
+## Exit Stub (Program Termination)
+
+Every mutated program automatically gets a 5-instruction exit sequence appended to ensure clean termination:
+
+```asm
+lui  t0, 0x80001        # Load TOHOST_ADDR upper bits
+addi t0, t0, 0          # Add lower bits (sign-corrected)
+li   t1, 1              # Load exit code (1)
+sw   t1, 0(t0)          # Write to TOHOST_ADDR (0x80001000)
+ebreak                  # Trigger breakpoint/trap
+```
+
+**Key Features:**
+- **Automatic**: Appended by mutator after all mutations
+- **Protected**: Last 5 instructions are locked from further mutation
+- **Fast Exit**: Programs terminate in ~5-10 cycles instead of timing out
+- **Configurable**: TOHOST_ADDR defined in `ExitStub.hpp` (default: 0x80001000)
+- **Detection**: Harness watches for MMIO write to TOHOST_ADDR or EBREAK trap
+
+**For Seed Files:**
+Original seed files don't have exit stubs. Use the provided script to add them:
+```bash
+# Add exit stubs to all seed files
+python3 tools/add_exit_stub_to_seeds.py
+
+# Or specify custom seeds directory
+python3 tools/add_exit_stub_to_seeds.py /path/to/seeds
 ```
 
 ## Configuration
@@ -250,12 +307,25 @@ schemas:
 ```
 
 ### Environment Variables
-- `MUTATOR_CONFIG` - Path to YAML config file (required)
-- `SCHEMA_DIR` - Override schema directory root
-- `DEBUG_MUTATOR` - Master debug switch: enables all logging, function tracing, and debug file output (0/1)
+- `PROJECT_ROOT` - Absolute path to project root directory (required for schema loading and log output)
+- `MUTATOR_CONFIG` - Path to YAML config file (optional, defaults to `config/mutator.default.yaml`)
+- `DEBUG` - Master debug switch: enables all logging, function tracing, and debug file output (0/1)
 
-**Note**: When `DEBUG_MUTATOR=1`, the mutator automatically:
+**Note**: When `DEBUG=1`, the mutator automatically:
 - Enables verbose logging to stdout (via harness_log)
-- Enables function entry/exit tracing
-- Creates debug log file at `afl/isa_mutator/logs/mutator_debug.log`
+- Enables function entry/exit tracing (FunctionTracer)
+- Creates debug log file at `$PROJECT_ROOT/workdir/logs/mutator_debug.log`
 - Logs illegal instruction mutations for analysis
+- All debug output goes to both stdout and the log file
+
+### Debug Usage Example
+```bash
+# Enable debug logging during fuzzing
+DEBUG=1 ./run.sh --cores 1
+
+# Or use the --debug flag (sets DEBUG=1 and AFL_DEBUG=1)
+./run.sh --debug --cores 1
+
+# Check debug log after fuzzing
+cat afl/isa_mutator/logs/mutator_debug.log
+```

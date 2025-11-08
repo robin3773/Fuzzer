@@ -18,45 +18,20 @@
 #include <fuzz/mutator/EncodeHelpers.hpp>
 #include <fuzz/mutator/ExitStub.hpp>
 #include <fuzz/mutator/LegalCheck.hpp>
-#include <fuzz/mutator/MutatorDebug.hpp>
 #include <fuzz/mutator/Random.hpp>
 
 namespace fuzz::mutator {
 
-namespace {
-
-const char *strategyToString(Strategy strategy) {
-  static const char* names[] = {"RAW", "IR", "HYBRID", "AUTO"};
-  return (strategy >= Strategy::RAW && strategy <= Strategy::AUTO) 
-         ? names[static_cast<int>(strategy)] 
-         : "UNKNOWN";
-}
-
-void logConfigSnapshot(const Config &cfg) {
-  std::fprintf(hwfuzz::harness_log(),
-               "[INFO] strategy=%s verbose=%s enable_c=%s decode_prob=%u imm_random_prob=%u r_weight_base_alu=%u r_weight_m=%u isa_name=%s\n",
-               strategyToString(cfg.strategy),
-               cfg.verbose ? "true" : "false",
-               cfg.enable_c ? "true" : "false",
-               cfg.decode_prob,
-               cfg.imm_random_prob,
-               cfg.r_weight_base_alu,
-               cfg.r_weight_m,
-               cfg.isa_name.c_str());
-}
-
-} // namespace
-
 ISAMutator::ISAMutator() = default;
 
 void ISAMutator::initFromEnv() {
-  FunctionTracer tracer(__FILE__, "ISAMutator::initFromEnv");
+  // Initialize debug system first (enables FunctionTracer)
+  debug::init_from_env();
   
-  // Load config from environment
-  cfg_ = loadConfigFromEnv();
+  debug::FunctionTracer tracer(__FILE__, "ISAMutator::initFromEnv");
   
-  MutatorDebug::init_from_env();
-  logConfigSnapshot(cfg_);
+  // Load config from environment (with automatic display when DEBUG=1)
+  cfg_ = loadConfig();
   
   // Load ISA schema (required)
   if (cfg_.isa_name.empty()) {
@@ -64,28 +39,23 @@ void ISAMutator::initFromEnv() {
     std::exit(1);
   }
   
-  try {
-    // ISA loader reads its own environment variables (SCHEMA_DIR, SCHEMA_MAP, SCHEMA_OVERRIDE)
-    isa_ = isa::load_isa_config(cfg_.isa_name);
-    
-    if (isa_.instructions.empty()) {
-  std::fprintf(hwfuzz::harness_log(), "[ERROR] No instructions in schema for ISA '%s'\n", cfg_.isa_name.c_str());
-      std::exit(1);
-    }
-    
-    use_schema_ = true;
-    word_bytes_ = std::max<uint32_t>(1, isa_.base_width / 8);
-    //FIXME - Have to Fix Later
-    std::fprintf(hwfuzz::harness_log(), "[INFO] Loaded ISA '%s': %zu instructions\n", isa_.isa_name.c_str(), isa_.instructions.size());
-  } catch (const std::exception &ex) {
-    std::fprintf(hwfuzz::harness_log(), "[ERROR] Schema load failed: %s\n", ex.what());
+  // Schema directory is automatically resolved to PROJECT_ROOT/schemas
+  isa_ = isa::load_isa_config(cfg_.isa_name);
+  
+  if (isa_.instructions.empty()) {
+    std::fprintf(hwfuzz::harness_log(), "[ERROR] No instructions in schema for ISA '%s'\n", cfg_.isa_name.c_str());
     std::exit(1);
   }
+  
+  use_schema_ = true;
+  word_bytes_ = std::max<uint32_t>(1, isa_.base_width / 8);
+  //FIXME - Have to Fix Later
+  std::fprintf(hwfuzz::harness_log(), "[INFO] Loaded ISA '%s': %zu instructions\n", isa_.isa_name.c_str(), isa_.instructions.size());
 }
 
 unsigned char *ISAMutator::mutateStream(unsigned char *in, size_t in_len,
                                            unsigned char *out_buf, size_t max_size) {
-  FunctionTracer tracer(__FILE__, "ISAMutator::mutateStream");
+  debug::FunctionTracer tracer(__FILE__, "ISAMutator::mutateStream");
   (void)out_buf;
   return use_schema_ ? mutateWithSchema(in, in_len, nullptr, max_size)
                      : mutateFallback(in, in_len, nullptr, max_size);
@@ -93,7 +63,7 @@ unsigned char *ISAMutator::mutateStream(unsigned char *in, size_t in_len,
 
 unsigned char *ISAMutator::mutateWithSchema(unsigned char *in, size_t in_len,
                                                unsigned char *, size_t max_size) {
-  FunctionTracer tracer(__FILE__, "ISAMutator::mutateWithSchema");
+  debug::FunctionTracer tracer(__FILE__, "ISAMutator::mutateWithSchema");
   if (isa_.instructions.empty())
     return nullptr;
 
@@ -259,7 +229,7 @@ unsigned char *ISAMutator::mutateWithSchema(unsigned char *in, size_t in_len,
 
 unsigned char *ISAMutator::mutateFallback(unsigned char *in, size_t in_len,
                                              unsigned char *, size_t max_size) {
-  FunctionTracer tracer(__FILE__, "ISAMutator::mutateFallback");
+  debug::FunctionTracer tracer(__FILE__, "ISAMutator::mutateFallback");
   constexpr size_t exit_stub_bytes = exit_stub::EXIT_STUB_INSN_COUNT * 4;
   constexpr size_t min_payload_bytes = 16 * 4;  // 16 instructions minimum
   constexpr size_t max_payload_bytes = 512 * 4; // 512 instructions maximum
@@ -325,7 +295,7 @@ unsigned char *ISAMutator::mutateFallback(unsigned char *in, size_t in_len,
 }
 
 const isa::InstructionSpec &ISAMutator::pickInstruction() const {
-  FunctionTracer tracer(__FILE__, "ISAMutator::pickInstruction");
+  debug::FunctionTracer tracer(__FILE__, "ISAMutator::pickInstruction");
   if (isa_.instructions.empty())
     throw std::runtime_error("No instructions available");
   uint32_t idx = Random::range(static_cast<uint32_t>(isa_.instructions.size()));
@@ -333,7 +303,7 @@ const isa::InstructionSpec &ISAMutator::pickInstruction() const {
 }
 
 uint32_t ISAMutator::encodeInstruction(const isa::InstructionSpec &spec) const {
-  FunctionTracer tracer(__FILE__, "ISAMutator::encodeInstruction");
+  debug::FunctionTracer tracer(__FILE__, "ISAMutator::encodeInstruction");
   auto fmt_it = isa_.formats.find(spec.format);
   if (fmt_it == isa_.formats.end())
     return Random::rnd32();
@@ -370,7 +340,7 @@ int64_t getSignedRandom(uint32_t width) {
 
 uint32_t ISAMutator::randomFieldValue(const std::string &field_name,
                                         const isa::FieldEncoding &enc) const {
-  FunctionTracer tracer(__FILE__, "ISAMutator::randomFieldValue");
+  debug::FunctionTracer tracer(__FILE__, "ISAMutator::randomFieldValue");
   if (enc.width == 0)
     return 0;
 
@@ -409,7 +379,7 @@ uint32_t ISAMutator::randomFieldValue(const std::string &field_name,
 }
 
 void ISAMutator::applyField(uint32_t &word, const isa::FieldEncoding &enc, uint32_t value) const {
-  FunctionTracer tracer(__FILE__, "ISAMutator::applyField");
+  debug::FunctionTracer tracer(__FILE__, "ISAMutator::applyField");
   if (enc.segments.empty())
     return;
 
@@ -426,7 +396,7 @@ void ISAMutator::applyField(uint32_t &word, const isa::FieldEncoding &enc, uint3
 }
 
 uint32_t ISAMutator::readWord(const unsigned char *buf, size_t offset) const {
-  FunctionTracer tracer(__FILE__, "ISAMutator::readWord");
+  debug::FunctionTracer tracer(__FILE__, "ISAMutator::readWord");
   if (word_bytes_ == 2)
     return internal::load_u16_le(buf, offset);
   else if (word_bytes_ == 4)
@@ -440,7 +410,7 @@ uint32_t ISAMutator::readWord(const unsigned char *buf, size_t offset) const {
 }
 
 void ISAMutator::writeWord(unsigned char *buf, size_t offset, uint32_t word) const {
-  FunctionTracer tracer(__FILE__, "ISAMutator::writeWord");
+  debug::FunctionTracer tracer(__FILE__, "ISAMutator::writeWord");
   if (word_bytes_ == 2)
     internal::store_u16_le(buf, offset, static_cast<uint16_t>(word));
   else if (word_bytes_ == 4)
@@ -451,7 +421,7 @@ void ISAMutator::writeWord(unsigned char *buf, size_t offset, uint32_t word) con
 }
 
 std::string ISAMutator::trim(const std::string &s) {
-  FunctionTracer tracer(__FILE__, "ISAMutator::trim");
+  debug::FunctionTracer tracer(__FILE__, "ISAMutator::trim");
   auto begin = s.find_first_not_of(" \t\n\r");
   if (begin == std::string::npos)
     return "";
@@ -460,7 +430,7 @@ std::string ISAMutator::trim(const std::string &s) {
 }
 
 bool ISAMutator::loadFallbackConfig(const std::string &path) {
-  FunctionTracer tracer(__FILE__, "ISAMutator::loadFallbackConfig");
+  debug::FunctionTracer tracer(__FILE__, "ISAMutator::loadFallbackConfig");
   std::ifstream ifs(path);
   if (!ifs)
     return false;
@@ -502,7 +472,7 @@ bool ISAMutator::loadFallbackConfig(const std::string &path) {
 }
 
 void ISAMutator::applyRule(const Rule &r, unsigned char *buf, size_t &len, size_t cap) {
-  FunctionTracer tracer(__FILE__, "ISAMutator::applyRule");
+  debug::FunctionTracer tracer(__FILE__, "ISAMutator::applyRule");
   uint32_t n = r.min + (r.max > r.min ? Random::range(r.max - r.min + 1) : 0);
   
   if (r.type == "byte_flip") {

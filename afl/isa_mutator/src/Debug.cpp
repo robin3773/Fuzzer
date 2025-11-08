@@ -30,7 +30,16 @@ void initDebug() {
   if (g_debug_enabled) {
     // Create logs directory if it doesn't exist
     namespace fs = std::filesystem;
-    fs::path log_dir = "afl/isa_mutator/logs";
+    
+    const char* project_root = std::getenv("PROJECT_ROOT");
+    fs::path log_dir;
+    if (project_root) {
+      log_dir = fs::path(project_root) / "workdir" / "logs";
+    } else {
+      // Fallback to current directory if PROJECT_ROOT not set
+      log_dir = "workdir/logs";
+    }
+    
     std::error_code ec;
     fs::create_directories(log_dir, ec);
     

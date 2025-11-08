@@ -30,57 +30,57 @@ riscv_formats: &riscv_formats
   R:
     width: 32
     fields:
-      - { name: opcode, bits: [0, 6],   width: 7 }
-      - { name: rd,     bits: [7, 11],  width: 5 }
-      - { name: funct3, bits: [12, 14], width: 3 }
-      - { name: rs1,    bits: [15, 19], width: 5 }
-      - { name: rs2,    bits: [20, 24], width: 5 }
-      - { name: funct7, bits: [25, 31], width: 7 }
+      - { name: opcode, bits: [0, 6],   width: 7, type: opcode }
+      - { name: rd,     bits: [7, 11],  width: 5, type: reg }
+      - { name: funct3, bits: [12, 14], width: 3, type: enum }
+      - { name: rs1,    bits: [15, 19], width: 5, type: reg }
+      - { name: rs2,    bits: [20, 24], width: 5, type: reg }
+      - { name: funct7, bits: [25, 31], width: 7, type: enum }
 
   I:
     width: 32
     fields:
-      - { name: opcode, bits: [0, 6],   width: 7 }
-      - { name: rd,     bits: [7, 11],  width: 5 }
-      - { name: funct3, bits: [12, 14], width: 3 }
-      - { name: rs1,    bits: [15, 19], width: 5 }
-      - { name: imm0,    bits: [20, 31], width: 12 }   # per-ISA marks signedness
+      - { name: opcode, bits: [0, 6],   width: 7, type: opcode }
+      - { name: rd,     bits: [7, 11],  width: 5, type: reg }
+      - { name: funct3, bits: [12, 14], width: 3, type: enum }
+      - { name: rs1,    bits: [15, 19], width: 5, type: reg }
+      - { name: imm0,   bits: [20, 31], width: 12, type: imm, signed: true }
 
   S:
     width: 32
     fields:
-      - { name: opcode, bits: [0, 6],   width: 7 }
-      - { name: imm0,   bits: [7, 11],  width: 5 }
-      - { name: funct3, bits: [12, 14], width: 3 }
-      - { name: rs1,    bits: [15, 19], width: 5 }
-      - { name: rs2,    bits: [20, 24], width: 5 }
-      - { name: imm1,   bits: [25, 31], width: 7 }
+      - { name: opcode, bits: [0, 6],   width: 7, type: opcode }
+      - { name: imm0,   bits: [7, 11],  width: 5, type: imm, signed: true }
+      - { name: funct3, bits: [12, 14], width: 3, type: enum }
+      - { name: rs1,    bits: [15, 19], width: 5, type: reg }
+      - { name: rs2,    bits: [20, 24], width: 5, type: reg }
+      - { name: imm1,   bits: [25, 31], width: 7, type: imm, signed: true }
 
   B:
     width: 32
     fields:
-      - { name: opcode, bits: [0, 6],   width: 7 }
-      - { name: imm0,   bits: [7, 7],   width: 1 }     # imm[11]
-      - { name: imm1,   bits: [8, 11],  width: 4 }    # imm[4:1]
-      - { name: funct3, bits: [12, 14], width: 3 }
-      - { name: rs1,    bits: [15, 19], width: 5 }
-      - { name: rs2,    bits: [20, 24], width: 5 }
-      - { name: imm2,   bits: [25, 30], width: 6 }   # imm[10:5]
-      - { name: imm3,   bits: [31, 31], width: 1 }   # imm[12]
+      - { name: opcode, bits: [0, 6],   width: 7, type: opcode }
+      - { name: imm0,   bits: [7, 7],   width: 1, type: imm, signed: true }
+      - { name: imm1,   bits: [8, 11],  width: 4, type: imm, signed: true }
+      - { name: funct3, bits: [12, 14], width: 3, type: enum }
+      - { name: rs1,    bits: [15, 19], width: 5, type: reg }
+      - { name: rs2,    bits: [20, 24], width: 5, type: reg }
+      - { name: imm2,   bits: [25, 30], width: 6, type: imm, signed: true }
+      - { name: imm3,   bits: [31, 31], width: 1, type: imm, signed: true }
 
   U:
     width: 32
     fields:
-      - { name: opcode, bits: [0, 6],   width: 7 }
-      - { name: rd,     bits: [7, 11],  width: 5 }
-      - { name: imm0,    bits: [12, 31], width: 20 }
+      - { name: opcode, bits: [0, 6],   width: 7, type: opcode }
+      - { name: rd,     bits: [7, 11],  width: 5, type: reg }
+      - { name: imm0,   bits: [12, 31], width: 20, type: imm, signed: false }
 
   J:
     width: 32
     fields:
-      - { name: opcode, bits: [0, 6],   width: 7 }
-      - { name: rd,     bits: [7, 11],  width: 5 }
-      - { name: imm0,    bits: [12, 31], width: 20 }   # split per-ISA via value_lsb if desired
+      - { name: opcode, bits: [0, 6],   width: 7, type: opcode }
+      - { name: rd,     bits: [7, 11],  width: 5, type: reg }
+      - { name: imm0,   bits: [12, 31], width: 20, type: imm, signed: true }
 
 # ------------------------------------------------------------
 # Compressed 16-bit format templates
@@ -90,64 +90,64 @@ riscv_c_formats: &riscv_c_formats
   C_CR:
     width: 16
     fields:
-      - { name: opcode, bits: [0, 1],   width: 2 }
-      - { name: rs2,    bits: [2, 6],   width: 5 }
-      - { name: rd_rs1, bits: [7, 11],  width: 5 }
-      - { name: funct4, bits: [12, 15], width: 4 }
+      - { name: opcode, bits: [0, 1],   width: 2, type: opcode }
+      - { name: rs2,    bits: [2, 6],   width: 5, type: reg }
+      - { name: rdrs1, bits: [7, 11],  width: 5, type: reg }
+      - { name: funct4, bits: [12, 15], width: 4, type: enum }
   C_CI:
     width: 16
     fields:
-      - { name: opcode, bits: [0, 1],   width: 2 }
-      - { name: imm0,   bits: [2, 6],   width: 5 }     # per-ISA may mark signed
-      - { name: rd_rs1, bits: [7, 11],  width: 5 }
-      - { name: imm1,   bits: [12, 12], width: 1 }
-      - { name: funct3, bits: [13, 15], width: 3 }
+      - { name: opcode, bits: [0, 1],   width: 2, type: opcode }
+      - { name: imm0,   bits: [2, 6],   width: 5, type: imm, signed: true }
+      - { name: rdrs1, bits: [7, 11],  width: 5, type: reg }
+      - { name: imm1,   bits: [12, 12], width: 1, type: imm, signed: true }
+      - { name: funct3, bits: [13, 15], width: 3, type: enum }
   C_CSS:
     width: 16
     fields:
-      - { name: opcode, bits: [0, 1],   width: 2 }
-      - { name: rs2,    bits: [2, 6],   width: 5 }
-      - { name: imm0,    bits: [7, 12],  width: 6 }     # per-ISA may mark signed
-      - { name: funct3, bits: [13, 15], width: 3 }
+      - { name: opcode, bits: [0, 1],   width: 2, type: opcode }
+      - { name: rs2,    bits: [2, 6],   width: 5, type: reg }
+      - { name: imm0,   bits: [7, 12],  width: 6, type: imm, signed: false }
+      - { name: funct3, bits: [13, 15], width: 3, type: enum }
   C_CIW:
     width: 16
     fields:
-      - { name: opcode, bits: [0, 1],   width: 2 }
-      - { name: rd,     bits: [2, 4],   width: 5 }     # per-ISA may mark signed
-      - { name: imm0,   bits: [5, 12],  width: 8 }
-      - { name: funct3, bits: [13, 15], width: 3 }
+      - { name: opcode, bits: [0, 1],   width: 2, type: opcode }
+      - { name: rd_,     bits: [2, 4],   width: 3, type: reg }
+      - { name: imm0,   bits: [5, 12],  width: 8, type: imm, signed: false }
+      - { name: funct3, bits: [13, 15], width: 3, type: enum }
   C_CL:
     width: 16
     fields:
-      - { name: opcode, bits: [0, 1],   width: 2 }
-      - { name: rd,     bits: [2, 4],   width: 3 }
-      - { name: imm0,   bits: [5, 6],   width: 2 }     # per-ISA may mark signed
-      - { name: rs1,    bits: [7, 9],   width: 5 }
-      - { name: imm1,   bits: [10, 12], width: 3 }
-      - { name: funct3, bits: [13, 15], width: 3 }
-    C_CS:
+      - { name: opcode, bits: [0, 1],   width: 2, type: opcode }
+      - { name: rd_,     bits: [2, 4],   width: 3, type: reg }
+      - { name: imm0,   bits: [5, 6],   width: 2, type: imm, signed: false }
+      - { name: rs1_,    bits: [7, 9],   width: 3, type: reg }
+      - { name: imm1,   bits: [10, 12], width: 3, type: imm, signed: false }
+      - { name: funct3, bits: [13, 15], width: 3, type: enum }
+  C_CS:
     width: 16
     fields:
-      - { name: opcode, bits: [0, 1],   width: 2 }
-      - { name: rs1,    bits: [2, 4],   width: 3 }
-      - { name: imm0,   bits: [5, 6],   width: 2 }     # per-ISA may mark signed
-      - { name: rd_rs1, bits: [7, 9],   width: 5 }
-      - { name: imm1,   bits: [10, 12], width: 3 }
-      - { name: funct3, bits: [13, 15], width: 3 }
+      - { name: opcode, bits: [0, 1],   width: 2, type: opcode }
+      - { name: rs2_,    bits: [2, 4],   width: 3, type: reg }
+      - { name: imm0,   bits: [5, 6],   width: 2, type: imm, signed: false }
+      - { name: rdrs1_,    bits: [7, 9],   width: 3, type: reg }
+      - { name: imm1,   bits: [10, 12], width: 3, type: imm, signed: false }
+      - { name: funct3, bits: [13, 15], width: 3, type: enum }
   C_CB:
     width: 16
     fields:
-      - { name: opcode, bits: [0, 1],   width: 2 }
-      - { name: imm0,   bits: [2, 6],   width: 2 }     # per-ISA may mark signed
-      - { name: rs1,    bits: [7, 9],   width: 5 }
-      - { name: imm1,   bits: [10, 12], width: 3 }     # per-ISA may mark signed
-      - { name: funct3, bits: [13, 15], width: 3 }
+      - { name: opcode, bits: [0, 1],   width: 2, type: opcode }
+      - { name: imm0,   bits: [2, 6],   width: 5, type: imm, signed: true }
+      - { name: rs1_,    bits: [7, 9],   width: 3, type: reg }
+      - { name: imm1,   bits: [10, 12], width: 3, type: imm, signed: true }
+      - { name: funct3, bits: [13, 15], width: 3, type: enum }
   C_CJ:
     width: 16
     fields:
-      - { name: opcode, bits: [0, 1],   width: 2 }
-      - { name: offset, bits: [2, 12],  width: 11 }
-      - { name: funct3, bits: [13, 15], width: 3 }
+      - { name: opcode, bits: [0, 1],   width: 2, type: opcode }
+      - { name: offset, bits: [2, 12],  width: 11, type: imm, signed: true }
+      - { name: funct3, bits: [13, 15], width: 3, type: enum }
 # ------------------------------------------------------------
 # Atomic and FP template variants (if extensions are included)
 # These are format shells; concrete field properties live in per-ext files.

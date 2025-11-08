@@ -3,6 +3,7 @@
 #include <yaml-cpp/yaml.h>
 
 #include <fuzz/isa/YamlUtils.hpp>
+#include <fuzz/Debug.hpp>
 
 #include <boost/algorithm/string.hpp>
 
@@ -11,7 +12,6 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
-#include <hwfuzz/Log.hpp>
 #include <map>
 #include <numeric>
 #include <sstream>
@@ -34,35 +34,36 @@ namespace {
   };
 
   std::vector<fs::path> resolve_schema_sources(const SchemaLocator &locator) {
-    if (locator.isa_name.empty())
-      throw std::runtime_error("[ERROR] Schema locator missing ISA name");
+    if (locator.isa_name.empty()) {
+      fuzz::debug::logError("Schema locator missing ISA name\n");
+      return {};
+    }
 
-    fs::path root = locator.root_dir.empty() ? fs::path("./schemas") : fs::path(locator.root_dir);
-    fs::path map_path = locator.map_path.empty() ? root / "isa_map.yaml" : fs::path(locator.map_path);
-    if (!map_path.is_absolute())
-      map_path = root / map_path;
+    fs::path root(locator.root_dir);
+    fs::path map_path = root / locator.map_path;
 
-  std::fprintf(hwfuzz::harness_log(), "[INFO] Using ISA Map: %s\n", map_path.string().c_str());
+    fuzz::debug::logInfo("Using ISA Map: %s\n", map_path.string().c_str());
 
     std::vector<fs::path> schema_files;
-    std::error_code ec;
-    if (fs::exists(map_path, ec)) {
+    if (fs::exists(map_path)) {
       auto includes = yaml_utils::includes_from_map(map_path, locator.isa_name);
-      fs::path base = map_path.parent_path();
       for (const auto &inc : includes) {
-        fs::path candidate = fs::path(inc);
+        fs::path candidate(inc);
         if (!candidate.is_absolute())
           candidate = root / candidate;
         candidate = candidate.lexically_normal();
-        if (!fs::exists(candidate, ec)) {
-          throw std::runtime_error("[ERROR] Schema include '" + candidate.string() + "' referenced by ISA map not found");
+        if (!fs::exists(candidate)) {
+          fuzz::debug::logError("Schema include '%s' referenced by ISA map not found\n", candidate.string().c_str());
+          return {};
         }
         schema_files.push_back(candidate);
       }
     }
 
-    if (schema_files.empty())
-      throw std::runtime_error("[ERROR] Unable to resolve schema sources for ISA '" + locator.isa_name + "'");
+    if (schema_files.empty()) {
+      fuzz::debug::logError("Unable to resolve schema sources for ISA '%s'\n", locator.isa_name.c_str());
+      return {};
+    }
 
     std::vector<fs::path> ordered;
     std::unordered_set<std::string> visited;
@@ -79,23 +80,30 @@ namespace {
       });
   }
 
+
   FieldSegment parse_segment(const YAML::Node &node, uint32_t default_value_lsb) {
     FieldSegment segment;
     segment.value_lsb = default_value_lsb;
 
     if (node.IsSequence()) {
-      if (node.size() != 2)
-        throw std::runtime_error("Segment sequence must contain [lsb, msb]");
+      if (node.size() != 2) {
+        fuzz::debug::logError("Segment sequence must contain [lsb, msb]\n");
+        return segment;
+      }
       segment.word_lsb = node[0].as<uint32_t>();
       uint32_t msb = node[1].as<uint32_t>();
-      if (msb < segment.word_lsb)
-        throw std::runtime_error("Segment msb < lsb");
+      if (msb < segment.word_lsb) {
+        fuzz::debug::logError("Segment msb < lsb\n");
+        return segment;
+      }
       segment.width = msb - segment.word_lsb + 1;
       return segment;
     }
 
-    if (!node.IsMap())
-      throw std::runtime_error("Unexpected segment node type");
+    if (!node.IsMap()) {
+      fuzz::debug::logError("Unexpected segment node type\n");
+      return segment;
+    }
 
     if (node["value_lsb"])
       segment.value_lsb = node["value_lsb"].as<uint32_t>();
@@ -108,17 +116,22 @@ namespace {
 
     if (node["bits"]) {
       const YAML::Node &bits = node["bits"];
-      if (!bits.IsSequence() || bits.size() != 2)
-        throw std::runtime_error("Segment bits must contain [lsb, msb]");
+      if (!bits.IsSequence() || bits.size() != 2) {
+        fuzz::debug::logError("Segment bits must contain [lsb, msb]\n");
+        return segment;
+      }
       segment.word_lsb = bits[0].as<uint32_t>();
       uint32_t msb = bits[1].as<uint32_t>();
-      if (msb < segment.word_lsb)
-        throw std::runtime_error("Segment msb < lsb");
+      if (msb < segment.word_lsb) {
+        fuzz::debug::logError("Segment msb < lsb\n");
+        return segment;
+      }
       segment.width = msb - segment.word_lsb + 1;
     }
 
-    if (!segment.width)
-      throw std::runtime_error("Segment missing width definition");
+    if (!segment.width) {
+      fuzz::debug::logError("Segment missing width definition\n");
+    }
 
     return segment;
   }
@@ -165,8 +178,10 @@ namespace {
     }
 
     auto append_segments = [&](const YAML::Node &source) {
-      if (!source.IsSequence())
-        throw std::runtime_error("Field '" + name + "' segments must be a sequence");
+      if (!source.IsSequence()) {
+        fuzz::debug::logError("Field '%s' segments must be a sequence\n", name.c_str());
+        return;
+      }
       uint32_t next_value_lsb = 0;
       if (!encoding.segments.empty())
         next_value_lsb = encoding.segments.back().value_lsb + encoding.segments.back().width;
@@ -200,8 +215,9 @@ namespace {
     if (!encoding.segments.empty() && !encoding.width)
       encoding.width = compute_field_width(encoding.segments);
 
-    if (encoding.segments.empty() && encoding.width == 0)
-      throw std::runtime_error("Field '" + name + "' missing width/segments definition");
+    if (encoding.segments.empty() && encoding.width == 0) {
+      fuzz::debug::logError("Field '%s' missing width/segments definition\n", name.c_str());
+    }
 
     if (encoding.kind == FieldKind::Unknown)
       encoding.kind = deduce_field_kind(name);
@@ -243,22 +259,30 @@ namespace {
     fmt.name = name;
     if (node["width"])
       fmt.width = node["width"].as<uint32_t>();
-    if (!node["fields"])
-      throw std::runtime_error("Format '" + name + "' missing fields");
+    if (!node["fields"]) {
+      fuzz::debug::logError("Format '%s' missing fields\n", name.c_str());
+      return fmt;
+    }
 
     const YAML::Node &field_list = node["fields"];
-    if (!field_list.IsSequence())
-      throw std::runtime_error("Format '" + name + "' fields must be a sequence");
+    if (!field_list.IsSequence()) {
+      fuzz::debug::logError("Format '%s' fields must be a sequence\n", name.c_str());
+      return fmt;
+    }
 
     for (auto entry : field_list) {
       if (entry.IsScalar()) {
         fmt.fields.emplace_back(entry.as<std::string>());
         continue;
       }
-      if (!entry.IsMap())
-        throw std::runtime_error("Format '" + name + "' has invalid field entry");
-      if (!entry["name"])
-        throw std::runtime_error("Inline field definition missing name in format '" + name + "'");
+      if (!entry.IsMap()) {
+        fuzz::debug::logError("Format '%s' has invalid field entry\n", name.c_str());
+        continue;
+      }
+      if (!entry["name"]) {
+        fuzz::debug::logError("Inline field definition missing name in format '%s'\n", name.c_str());
+        continue;
+      }
       std::string field_name = entry["name"].as<std::string>();
       fmt.fields.emplace_back(field_name);
       FieldEncoding derived = parse_field(field_name, entry);
@@ -271,8 +295,10 @@ namespace {
   InstructionSpec parse_instruction(const std::string &name, const YAML::Node &node) {
     InstructionSpec spec;
     spec.name = name;
-    if (!node["format"])
-      throw std::runtime_error("Instruction '" + name + "' missing format");
+    if (!node["format"]) {
+      fuzz::debug::logError("Instruction '%s' missing format\n", name.c_str());
+      return spec;
+    }
     spec.format = node["format"].as<std::string>();
     
     if (auto fixed = node["fixed"]; fixed && fixed.IsMap()) {
@@ -298,8 +324,10 @@ namespace {
 
 ISAConfig load_isa_config_impl(const SchemaLocator &locator) {
   auto sources = resolve_schema_sources(locator);
-  if (sources.empty())
-    throw std::runtime_error("No schema files resolved for ISA '" + locator.isa_name + "'");
+  if (sources.empty()) {
+    fuzz::debug::logError("No schema files resolved for ISA '%s'\n", locator.isa_name.c_str());
+    return ISAConfig{};
+  }
 
   std::vector<std::pair<std::string, std::string>> anchor_library;
   YAML::Node merged;
@@ -313,7 +341,8 @@ ISAConfig load_isa_config_impl(const SchemaLocator &locator) {
     try {
       node = YAML::Load(combined);
     } catch (const YAML::ParserException &ex) {
-      throw std::runtime_error("Failed to parse schema file '" + source.string() + "': " + ex.what());
+      fuzz::debug::logError("Failed to parse schema file '%s': %s\n", source.string().c_str(), ex.what());
+      continue;
     }
 
     if (node["__anchors"])
@@ -339,13 +368,15 @@ ISAConfig load_isa_config_impl(const SchemaLocator &locator) {
         }
       }
     }
-  std::fprintf(hwfuzz::harness_log(), "[INFO] Loading %s: %zu instructions\n", source.filename().string().c_str(), inst_count);
+    fuzz::debug::logInfo("Loading %s: %zu instructions\n", source.filename().string().c_str(), inst_count);
 
     yaml_utils::merge_nodes(merged, node);
   }
 
-  if (!merged || !merged.IsMap())
-    throw std::runtime_error("Merged schema for ISA '" + locator.isa_name + "' is empty");
+  if (!merged || !merged.IsMap()) {
+    fuzz::debug::logError("Merged schema for ISA '%s' is empty\n", locator.isa_name.c_str());
+    return ISAConfig{};
+  }
 
   ISAConfig isa;
   isa.isa_name = locator.isa_name;
@@ -448,16 +479,22 @@ ISAConfig load_isa_config_impl(const SchemaLocator &locator) {
 }
 
 ISAConfig load_isa_config(const std::string &isa_name) {
-  // Read schema directory from environment variable
-  const char *schema_dir_env = std::getenv("SCHEMA_DIR");
-  if (!schema_dir_env)
-    throw std::runtime_error("[ERROR] SCHEMA_DIR environment variable not set'\n");
-
-  std::fprintf(hwfuzz::harness_log(), "[INFO] Using schema directory: %s\n", schema_dir_env);
-
+  // Get project root from environment variable
+  const char* project_root = std::getenv("PROJECT_ROOT");
+  if (!project_root) {
+    fuzz::debug::logError("PROJECT_ROOT environment variable not set\n");
+    return ISAConfig{};
+  }
   
+  // Schema directory is always at PROJECT_ROOT/schemas
+  fs::path schema_dir = fs::path(project_root) / "schemas";
+  std::string schema_dir_str = schema_dir.string();
+  
+  fuzz::debug::logInfo("PROJECT_ROOT: %s\n", project_root);
+  fuzz::debug::logInfo("Schema directory: %s\n", schema_dir_str.c_str());
+
   SchemaLocator locator {
-    .root_dir = schema_dir_env ? schema_dir_env : "./schemas",
+    .root_dir = schema_dir_str,
     .isa_name = isa_name,
     .map_path = "isa_map.yaml"
   };

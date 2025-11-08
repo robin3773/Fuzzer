@@ -22,7 +22,10 @@ endif
 # Compiler flags
 CXXFLAGS := -std=c++17 -fPIC -Wall -Wextra -Wno-unused-parameter -Iinclude -I../../include -O2
 
+# Export environment variables for runtime
+PROJECT_ROOT   ?= $(abspath ../..)
 MUTATOR_CONFIG ?= $(abspath config/mutator.default.yaml)
+export PROJECT_ROOT
 export MUTATOR_CONFIG
 
 # yaml-cpp detection (pkg-config preferred)
@@ -47,7 +50,6 @@ SOURCES = \
   $(SRC_DIR)/YamlUtils.cpp \
   $(SRC_DIR)/IsaLoader.cpp \
   $(SRC_DIR)/AFLInterface.cpp \
-  $(SRC_DIR)/DebugUtils.cpp \
   $(SRC_DIR)/Debug.cpp \
   $(SRC_DIR)/ISAMutator.cpp \
   $(SRC_DIR)/LegalCheck.cpp \

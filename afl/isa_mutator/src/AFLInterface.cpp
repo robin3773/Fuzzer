@@ -9,8 +9,8 @@
 
 #include <hwfuzz/Log.hpp>
 
+#include <fuzz/mutator/DebugUtils.hpp>
 #include <fuzz/mutator/ISAMutator.hpp>
-#include <fuzz/mutator/MutatorDebug.hpp>
 #include <fuzz/mutator/Random.hpp>
 
 namespace mut = fuzz::mutator;
@@ -89,7 +89,7 @@ const char *mutator_get_active_strategy() {
 
 void afl_custom_deinit(void) {
   std::fprintf(hwfuzz::harness_log(), "[] deinit\n");
-  MutatorDebug::deinit();
+  fuzz::mutator::debug::deinit();
 }
 
 size_t afl_custom_mutator(void * /*afl*/,

@@ -38,7 +38,7 @@ CRASH_DIR=""                      # computed after args
 CORES="${CORES:-1}"
 MEM_LIMIT="${MEM_LIMIT:-4G}"        # e.g., 4G or 'none'
 TIMEOUT="${TIMEOUT:-100000}"       # ms or 'none'
-DEBUG_MUTATOR="${DEBUG_MUTATOR:-0}"
+DEBUG="${DEBUG:-0}"
 MAX_CYCLES="${MAX_CYCLES:-50000}"
 
 NO_BUILD=0
@@ -62,7 +62,7 @@ Options:
       --bin PATH           Harness binary (default: ${FUZZ_BIN})
       --afl-args "ARGS"    Extra args passed to afl-fuzz (e.g. "-d -x dict")
       --no-build           Skip building mutator/harness (assume ready)
-      --debug              Enable mutator debug (DEBUG_MUTATOR=1) and AFL_DEBUG=1
+      --debug              Enable mutator debug (DEBUG=1) and AFL_DEBUG=1
       --max-cycles N       Pass MAX_CYCLES to harness
       --golden MODE        GOLDEN_MODE = live | off | batch | replay (default: live)
       --spike PATH         Path to Spike binary (SPIKE_BIN)
@@ -96,7 +96,7 @@ while [[ $# -gt 0 ]]; do
     --bin)             FUZZ_BIN="$(realpath -m "$2")"; shift 2 ;;
     --afl-args)        AFL_EXTRA_ARGS="$2"; shift 2 ;;
     --no-build)        NO_BUILD=1; shift ;;
-    --debug)           DEBUG_MUTATOR=1; AFL_DEBUG_FLAG=1; shift ;;
+    --debug)           DEBUG=1; AFL_DEBUG_FLAG=1; shift ;;
     --max-cycles)      MAX_CYCLES="$2"; shift 2 ;;
     --golden)          GOLDEN_MODE="$2"; shift 2 ;;
     --spike)           SPIKE_BIN="$(realpath -m "$2")"; shift 2 ;;
@@ -178,7 +178,7 @@ fi
 # Note: Defaults are loaded from fuzzer.env; these exports allow CLI overrides
 export AFL_SKIP_CPUFREQ=1
 export AFL_CUSTOM_MUTATOR_LIBRARY="$MUTATOR_SO"
-export DEBUG_MUTATOR="${DEBUG_MUTATOR:-0}"
+export DEBUG="${DEBUG:-0}"
 export MAX_CYCLES="${MAX_CYCLES:-50000}"
 
 # Always set mutator config (default or user-specified)
@@ -270,7 +270,7 @@ if [[ -n "${LD_BIN:-}" ]];      then export LD_BIN; fi
 export PC_STAGNATION_LIMIT MAX_PROGRAM_WORDS STOP_ON_SPIKE_DONE APPEND_EXIT_STUB
 
 # Preserve these env vars in the target (space-separated list for AFL++)
-export AFL_KEEP_ENV="CRASH_LOG_DIR TRACE_DIR MAX_CYCLES GOLDEN_MODE EXEC_BACKEND TRACE_MODE SPIKE_BIN SPIKE_ISA OBJCOPY_BIN OBJDUMP_BIN LD_BIN SPIKE_LOG_FILE LINKER_SCRIPT HARNESS_STDIO_LOG TOHOST_ADDR PC_STAGNATION_LIMIT MAX_PROGRAM_WORDS STOP_ON_SPIKE_DONE APPEND_EXIT_STUB RAM_BASE RAM_SIZE PROGADDR_RESET PROGADDR_IRQ STACK_ADDR STACKADDR MUTATOR_CONFIG SCHEMA_DIR"
+export AFL_KEEP_ENV="CRASH_LOG_DIR TRACE_DIR MAX_CYCLES DEBUG GOLDEN_MODE EXEC_BACKEND TRACE_MODE SPIKE_BIN SPIKE_ISA OBJCOPY_BIN OBJDUMP_BIN LD_BIN SPIKE_LOG_FILE LINKER_SCRIPT HARNESS_STDIO_LOG TOHOST_ADDR PC_STAGNATION_LIMIT MAX_PROGRAM_WORDS STOP_ON_SPIKE_DONE APPEND_EXIT_STUB RAM_BASE RAM_SIZE PROGADDR_RESET PROGADDR_IRQ STACK_ADDR STACKADDR MUTATOR_CONFIG SCHEMA_DIR"
 
 # Optional AFL debug (very chatty)
 if [[ "$AFL_DEBUG_FLAG" == "1" ]]; then
@@ -306,7 +306,7 @@ cat <<BANNER
   Mutator SO   : $MUTATOR_SO
   Mutator Cfg  : $MUTATOR_CONFIG
   Harness Bin  : $FUZZ_BIN
-  Debug        : $DEBUG_MUTATOR (AFL_DEBUG=$AFL_DEBUG_FLAG)
+  Debug        : $DEBUG (AFL_DEBUG=$AFL_DEBUG_FLAG)
   Cores        : $CORES
   Timeout      : $TIMEOUT
   Mem Limit    : $MEM_LIMIT
