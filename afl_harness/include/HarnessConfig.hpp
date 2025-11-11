@@ -1,102 +1,53 @@
+/**
+ * @file HarnessConfig.hpp
+ * @brief Configuration management for AFL++ fuzzing harness
+ * 
+ * Loads settings from harness.conf file and environment variables.
+ */
+
 #pragma once
 
-#include <hwfuzz/Log.hpp>
-#include <cctype>
-#include <cstdlib>
+#include <cstdint>
 #include <filesystem>
-#include <cstring>
-#include <iomanip>
-#include <iostream>
-#include <limits.h>
 #include <string>
-#include <unistd.h>
+#include <unordered_map>
 
+/**
+ * @brief Central configuration for fuzzing harness runtime parameters
+ * 
+ * Configuration is loaded from {PROJECT_ROOT}/afl_harness/harness.conf
+ * and environment variables. Call loadconfig() after construction.
+ */
 struct HarnessConfig {
-  std::string crash_dir; // Absolute path to crash log directory
-  std::string objdump; // Path to objdump binary
-  int xlen = 32;       // 32 or 64
-  unsigned max_cycles = 10000;
-  bool stop_on_spike_done = true;
-  bool use_tohost = false;
-  uint32_t tohost_addr = 0;
-  unsigned pc_stagnation_limit = 512;
-  unsigned max_program_words = 256;
+  std::string crash_dir;              ///< Crash log directory: {PROJECT_ROOT}/workdir/logs/crash
+  std::string trace_dir;              ///< Trace output directory: {PROJECT_ROOT}/workdir/traces
+  std::string objdump;                ///< Path to RISC-V objdump binary (from OBJDUMP in harness.conf)
+  int xlen = 32;                      ///< ISA register width - 32 or 64 bits (from XLEN in harness.conf)
+  unsigned max_cycles = 10000;        ///< Maximum clock cycles per test case (from MAX_CYCLES in harness.conf)
+  bool stop_on_spike_done = true;     ///< Stop execution when Spike exits (from STOP_ON_SPIKE_DONE in harness.conf)
+  bool use_tohost = true;             ///< Always enabled - monitors tohost address for program completion
+  uint32_t tohost_addr = 0;           ///< Memory address for tohost register (from TOHOST_ADDR environment variable)
+  unsigned pc_stagnation_limit = 512; ///< Max instructions at same PC before timeout (from PC_STAGNATION_LIMIT in harness.conf)
+  unsigned max_program_words = 256;   ///< Maximum program size in 32-bit words (from MAX_PROGRAM_WORDS in harness.conf)
 
-  static bool parse_u32_env(const char* text, uint32_t& out) {
-    if (!text || !*text) return false;
-    char* end = nullptr;
-    unsigned long v = std::strtoul(text, &end, 0);
-    if (end == text) return false;
-    out = static_cast<uint32_t>(v);
-    return true;
-  }
+  /**
+   * @brief Parse .conf file (KEY=value format) into map
+   * 
+   * Reads a .conf file with KEY=value format (one per line).
+   * Supports comments starting with # and section headers in [brackets].
+   * 
+   * @param conf_path Path to configuration file
+   * @return Map of key-value pairs from the config file
+   */
+  static std::unordered_map<std::string, std::string> parse_conf_file(const std::string& conf_path);
 
-  static unsigned parse_unsigned_env(const char* text, unsigned defv) {
-    if (!text || !*text) return defv;
-    char* end = nullptr;
-    unsigned long v = std::strtoul(text, &end, 0);
-    if (end == text) return defv;
-    if (v == 0) return defv;
-    return static_cast<unsigned>(v);
-  }
-
-  static bool parse_bool_env(const char* text, bool defv) {
-    if (!text || !*text) return defv;
-    if (std::strcmp(text, "0") == 0) return false;
-    if (std::strcmp(text, "1") == 0) return true;
-    char c = static_cast<char>(std::tolower(static_cast<unsigned char>(text[0])));
-    if (c == 't' || c == 'y') return true;
-    if (c == 'f' || c == 'n') return false;
-    return defv;
-  }
-
-  static std::string getenv_or(const char *key, const char *defv) {
-    const char *val = std::getenv(key);
-    return (val && *val) ? val : defv;
-  }
-
-  void load_from_env() {
-    std::string cd = getenv_or("CRASH_LOG_DIR", "workdir/logs/crash");
-
-    if (!cd.empty() && cd.front() != '/') {
-      char exe_path[PATH_MAX];
-      ssize_t n = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
-      if (n > 0) {
-        exe_path[n] = '\0';
-        std::filesystem::path root = std::filesystem::path(exe_path).parent_path().parent_path();
-        cd = (std::filesystem::absolute(root) / cd).string();
-      }
-    }
-
-    crash_dir = cd;
-    std::fprintf(hwfuzz::harness_log(), "[INFO] Using crash directory: %s\n", crash_dir.c_str());
-
-    objdump = getenv_or("OBJDUMP", "/opt/riscv/bin/riscv32-unknown-elf-objdump");
-    std::fprintf(hwfuzz::harness_log(), "[INFO] Using objdump: %s\n", objdump.c_str());
-
-    xlen = (getenv_or("XLEN", "32") == "64") ? 64 : 32;
-
-    std::string mc = getenv_or("MAX_CYCLES", "");
-    if (!mc.empty()) {
-      if (unsigned v = std::strtoul(mc.c_str(), nullptr, 0); v)
-        max_cycles = v;
-    }
-
-    stop_on_spike_done = parse_bool_env(std::getenv("STOP_ON_SPIKE_DONE"), true);
-    pc_stagnation_limit = parse_unsigned_env(std::getenv("PC_STAGNATION_LIMIT"), pc_stagnation_limit);
-    max_program_words = parse_unsigned_env(std::getenv("MAX_PROGRAM_WORDS"), max_program_words);
-
-    if (uint32_t addr = 0; parse_u32_env(std::getenv("TOHOST_ADDR"), addr)) {
-      tohost_addr = addr;
-      use_tohost = true;
-    }
-
-    std::fprintf(hwfuzz::harness_log(), "[INFO] Max cycles: %u\n", max_cycles);
-    std::fprintf(hwfuzz::harness_log(), "[INFO] Max program words: %u\n", max_program_words);
-    std::fprintf(hwfuzz::harness_log(), "[INFO] PC stagnation limit: %u\n", pc_stagnation_limit);
-    std::fprintf(hwfuzz::harness_log(), "[INFO] Stop on Spike completion: %s\n", stop_on_spike_done ? "yes" : "no");
-    if (use_tohost) {
-      std::fprintf(hwfuzz::harness_log(), "[INFO] tohost address: 0x%08x\n", tohost_addr);
-    }
-  }
+  /**
+   * @brief Load configuration from harness.conf and environment variables
+   * 
+   * Reads from {PROJECT_ROOT}/afl_harness/harness.conf and environment.
+   * PROJECT_ROOT and TOHOST_ADDR come from environment variables.
+   * Other settings loaded from harness.conf file.
+   * Logs all configuration values for debugging.
+   */
+  void loadconfig();
 };

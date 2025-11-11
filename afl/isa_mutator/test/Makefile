@@ -14,14 +14,14 @@ TEST_SRC    := mutator_selftest.cpp
 
 # Runtime knobs (now supported)
 SEED    ?= 12345
-REPEAT  ?= 5
-INPUT   ?= ../../../seeds/firmware.bin
+REPEAT  ?= 1
+INPUT   ?= $(abspath ../../../seeds/firmware.bin)
 OBJDUMP ?= /opt/riscv/riscv32-unknown-elf/bin/objdump
 
-# Environment variables for mutator
-PROJECT_ROOT   ?= $(ROOT_DIR)/../..
-MUTATOR_CONFIG ?= $(ROOT_DIR)/config/mutator.default.yaml
-DEBUG_MUTATOR  ?=
+# Environment variables for mutator (use absolute paths)
+PROJECT_ROOT   ?= $(abspath $(ROOT_DIR)/../..)
+MUTATOR_CONFIG ?= $(abspath $(ROOT_DIR)/config/mutator.default.yaml)
+DEBUG          ?=
 
 all: $(TEST_BIN)
 
@@ -35,17 +35,18 @@ run: $(TEST_BIN)
 		exit 1; \
 	fi
 	@echo "[+] Running mutator self-test..."
+	$(if $(DEBUG),DEBUG=$(DEBUG),) \
 	PROJECT_ROOT=$(PROJECT_ROOT) \
 	MUTATOR_CONFIG=$(MUTATOR_CONFIG) \
-	$(if $(DEBUG_MUTATOR),DEBUG_MUTATOR=$(DEBUG_MUTATOR),) \
-	OBJDUMP=$(OBJDUMP) ./$(TEST_BIN) \
-		--lib $(MUTATOR_SO) \
-		$(if $(INPUT),--in $(INPUT),) \
+	OBJDUMP=$(OBJDUMP) \
+	./$(TEST_BIN) \
+		--lib $(abspath $(MUTATOR_SO)) \
+		--in $(INPUT) \
 		--seed $(SEED) \
 		--repeat $(REPEAT)
 
 debug: $(TEST_BIN)
-	@$(MAKE) run DEBUG_MUTATOR=1
+	@$(MAKE) run DEBUG=1
 
 clean:
 	rm -f $(TEST_BIN)

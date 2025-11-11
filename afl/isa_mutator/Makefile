@@ -50,22 +50,30 @@ SOURCES = \
   $(SRC_DIR)/YamlUtils.cpp \
   $(SRC_DIR)/IsaLoader.cpp \
   $(SRC_DIR)/AFLInterface.cpp \
-  $(SRC_DIR)/Debug.cpp \
   $(SRC_DIR)/ISAMutator.cpp \
-  $(SRC_DIR)/LegalCheck.cpp \
-  $(SRC_DIR)/CompressedMutator.cpp
+  $(SRC_DIR)/LegalCheck.cpp
 
 OBJECTS = $(SOURCES:$(SRC_DIR)/%.cpp=$(OBJ_DIR)/%.o)
 
+# Special rule for shared Debug.cpp
+DEBUG_OBJ = $(OBJ_DIR)/Debug.o
+ALL_OBJECTS = $(OBJECTS) $(DEBUG_OBJ)
+
 all: $(TARGET)
 
-$(TARGET): $(OBJECTS)
+$(TARGET): $(ALL_OBJECTS)
 	@echo "$(C_GRN)[LD] Building $@$(C_RESET)"
 	$(CXX) -o $@ $^ $(LDFLAGS) $(LDLIBS)
 
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.cpp
 	@mkdir -p $(OBJ_DIR)
 	@echo "$(C_BLU)[CXX] Compiling $<$(C_RESET)"
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+# Special rule for shared Debug.cpp from include/hwfuzz/
+$(DEBUG_OBJ): ../../include/hwfuzz/Debug.cpp
+	@mkdir -p $(OBJ_DIR)
+	@echo "$(C_BLU)[CXX] Compiling $< (shared)$(C_RESET)"
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 clean:

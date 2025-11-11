@@ -22,37 +22,33 @@ namespace fuzz::mutator {
  * @brief Mutation strategy selection
  * 
  * Determines how the mutator generates new test cases:
- * - RAW: Simple bit-flipping and byte mutations
- * - IR: Schema-driven instruction-level mutations only
- * - HYBRID: Mix of IR and RAW based on decode_prob
- * - AUTO: Adaptive strategy based on feedback
+ * - BYTE_LEVEL: Simple bit-flipping and byte mutations (legacy - not recommended)
+ * - INSTRUCTION_LEVEL: Schema-driven instruction-level mutations (recommended)
+ * - MIXED_MODE: Combination of instruction-level and byte-level based on decode_prob
+ * - ADAPTIVE: Dynamically selects strategy based on fuzzing feedback
+ * 
+ * **Recommended:** Use INSTRUCTION_LEVEL for ISA-aware fuzzing with full schema support.
  */
 enum class Strategy : uint8_t { 
-  RAW = 0,    ///< Raw bitflip mutations only
-  IR = 1,     ///< Schema-driven instruction-level mutations
-  HYBRID = 2, ///< Mix of IR and RAW based on probabilities
-  AUTO = 3    ///< Adaptive strategy selection
+  BYTE_LEVEL = 0,       ///< Raw bitflip mutations only (legacy mode)
+  INSTRUCTION_LEVEL = 1, ///< Schema-driven instruction-level mutations (default)
+  MIXED_MODE = 2,       ///< Combination of instruction and byte mutations
+  ADAPTIVE = 3          ///< Adaptive strategy selection based on coverage feedback
 };
 
 /**
  * @struct Config
  * @brief Mutator configuration loaded from YAML file
  * 
- * This structure holds all runtime configuration for the ISA mutator,
- * including mutation strategy, probabilities, and ISA schema settings.
+ * This structure holds runtime configuration for the ISA mutator,
+ * including mutation strategy and ISA schema settings.
  * Loaded from MUTATOR_CONFIG environment variable path.
  * 
  * @see loadConfig()
  */
 struct Config {
-  Strategy strategy = Strategy::IR;          ///< Mutation strategy (RAW/IR/HYBRID/AUTO)
-  bool verbose = false;                      ///< Enable verbose logging at startup
-  uint32_t decode_prob = 60;                 ///< Probability (0-100) of schema-guided mutation in HYBRID mode
-  uint32_t imm_random_prob = 25;             ///< Probability (0-100) of random vs delta immediate mutation
-  uint32_t r_weight_base_alu = 70;           ///< Weight (0-100) for base ALU instructions
-  uint32_t r_weight_m = 30;                  ///< Weight (0-100) for M-extension instructions
-
-  std::string isa_name;                      ///< ISA identifier (e.g., "rv32im")
+  Strategy strategy = Strategy::INSTRUCTION_LEVEL; ///< Mutation strategy (BYTE_LEVEL/INSTRUCTION_LEVEL/MIXED_MODE/ADAPTIVE)
+  std::string isa_name;                            ///< ISA identifier (e.g., "rv32im")
 };
 
 /**

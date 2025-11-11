@@ -1,17 +1,25 @@
-# Example profile favouring schema-heavy mutations.
-strategy: HYBRID
-verbose: true
-enable_c: true
-
-probabilities:
-  decode: 90
-  imm_random: 15
-
-weights:
-  r_base_alu: 85
-  r_m: 50
+# Aggressive mutation profile for deep exploration
+# Strategy: MIXED_MODE combines instruction-level and byte-level mutations
+strategy: MIXED_MODE
 
 schemas:
   isa: rv32i
   root: ./schemas
   map: isa_map.yaml
+
+# ============================================================================
+# RESERVED FIELDS (for future enhancements - see FUTUREWORK.md)
+# ============================================================================
+# verbose: true                     # Reserved: Enable verbose logging
+# enable_c: true                    # Reserved: Enable RVC compressed instructions
+#
+# probabilities:                    # Reserved: Fine-tune mutation behavior
+#   decode: 90                      # Reserved: Higher schema-based mutation rate
+#   imm_random: 15                  # Reserved: More random immediates
+#
+# weights:                          # Reserved: Favor certain instruction types
+#   r_base_alu: 85                  # Reserved: Higher ALU instruction weight
+#   r_m: 50                         # Reserved: Higher multiply/divide weight
+#
+# See ../FUTUREWORK.md for planned implementation
+# ============================================================================

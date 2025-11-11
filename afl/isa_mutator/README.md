@@ -21,8 +21,6 @@ afl/isa_mutator/
 │   │
 │   └── mutator/                     # Mutation Engine
 │       ├── AFLInterface.hpp         # AFL++ custom mutator API
-│       ├── CompressedMutator.hpp    # RVC (compressed) instruction mutations
-│       ├── DebugUtils.hpp           # Unified debug system (function tracing + event logging)
 │       ├── EncodeHelpers.hpp        # Instruction encoding utilities
 │       ├── ExitStub.hpp             # Exit stub generation (LUI/ADDI/SW/EBREAK)
 │       ├── ISAMutator.hpp           # Main mutation engine
@@ -130,6 +128,24 @@ CompressedMutator.cpp/hpp
 └── compress_to_16bit()  - Compress eligible instructions
 ```
 
+### 5. Debug System
+```
+Debug.hpp / Debug.cpp (unified debug system - see DEBUG_API.md)
+├── logInfo()            - Informational messages
+├── logWarn()            - Warning messages  
+├── logError()           - Error messages
+├── logDebug()           - Detailed debug traces
+├── logIllegal()         - Track illegal mutations
+├── FunctionTracer       - RAII function entry/exit logging (automatic)
+├── isDebugEnabled()     - Check if DEBUG=1
+└── getDebugLog()        - Get log file handle
+
+Note: All debug output controlled by DEBUG environment variable.
+      Logs to: workdir/logs/mutator_debug.log
+      Thread-safe with automatic initialization.
+```
+```
+
 ### 5. Debug & Utilities
 ```
 DebugUtils.hpp (header-only)
@@ -192,7 +208,7 @@ AFL++ Fuzzer
 - `fuzz/mutator/Random.hpp` — xorshift-based RNG shared by mutator components.
 - `fuzz/mutator/LegalCheck.hpp` — structural checks against ISA constraints.
 - `fuzz/mutator/MutatorInterface.hpp` — AFL-facing wrapper helpers.
-- `fuzz/mutator/DebugUtils.hpp` — unified debug system (function tracing + event logging).
+- `fuzz/Debug.hpp` — unified debug system (function tracing + logging) - see DEBUG_API.md.
 - `fuzz/mutator/ExitStub.hpp` — exit stub generation and encoding utilities.
 - `fuzz/isa/IsaLoader.hpp` — YAML loader for ISA schema files.
 
@@ -201,7 +217,7 @@ AFL++ Fuzzer
 - `IsaLoader.cpp` — YAML parsing and `ISAConfig` construction.
 - `AFLInterface.cpp` — hooks exported to AFL++ (`afl_custom_*` symbols).
 - `Random.cpp`, `LegalCheck.cpp` — shared utilities backing the mutator.
-- `CompressedMutator.cpp` — conservative mutations for RVC lanes.
+- `Debug.cpp` — unified debug system implementation (thread-safe logging).
 - `Debug.cpp` — debug utility implementations.
 
 ### test/

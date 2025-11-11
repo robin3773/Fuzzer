@@ -1,16 +1,28 @@
-# Default runtime settings mirroring historical in-code behaviour.
-strategy: IR
-verbose: false
-
-probabilities:
-  decode: 60
-  imm_random: 25
-
-weights:
-  r_base_alu: 70
-  r_m: 30
+# Default runtime settings for ISA-aware fuzzing
+# Strategy options: INSTRUCTION_LEVEL (recommended), BYTE_LEVEL, MIXED_MODE, ADAPTIVE
+# Legacy names also supported: IR, RAW, HYBRID, AUTO
+strategy: INSTRUCTION_LEVEL
 
 schemas:
   isa: rv32im
   root: ./schemas
   map: isa_map.yaml
+
+# ============================================================================
+# RESERVED FIELDS (for future enhancements - see FUTUREWORK.md)
+# ============================================================================
+# The following fields are reserved for future implementation but currently unused:
+#
+# verbose: false                    # Reserved: Verbose logging control
+# enable_c: true                    # Reserved: RVC compressed instructions toggle
+#
+# probabilities:                    # Reserved: Mutation probability tuning
+#   decode: 60                      # Reserved: Schema vs byte-level in MIXED_MODE
+#   imm_random: 25                  # Reserved: Random vs delta immediates
+#
+# weights:                          # Reserved: Weighted instruction selection
+#   r_base_alu: 70                  # Reserved: Base ALU instruction weight
+#   r_m: 30                         # Reserved: M-extension instruction weight
+#
+# For implementation details and rationale, see ../FUTUREWORK.md
+# ============================================================================

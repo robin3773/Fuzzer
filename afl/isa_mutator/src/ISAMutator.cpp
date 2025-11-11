@@ -1,20 +1,12 @@
 #include <fuzz/mutator/ISAMutator.hpp>
 
-#include <hwfuzz/Log.hpp>
+#include <hwfuzz/Debug.hpp>
 
 #include <algorithm>
-#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <filesystem>
-#include <fstream>
-#include <sstream>
-#include <stdexcept>
-#include <vector>
 
-#include <fuzz/mutator/CompressedMutator.hpp>
-#include <fuzz/mutator/DebugUtils.hpp>
 #include <fuzz/mutator/EncodeHelpers.hpp>
 #include <fuzz/mutator/ExitStub.hpp>
 #include <fuzz/mutator/LegalCheck.hpp>
@@ -26,16 +18,16 @@ ISAMutator::ISAMutator() = default;
 
 void ISAMutator::initFromEnv() {
   // Initialize debug system first (enables FunctionTracer)
-  debug::init_from_env();
+  // Note: debug system initializes automatically on first use
   
-  debug::FunctionTracer tracer(__FILE__, "ISAMutator::initFromEnv");
+  hwfuzz::debug::FunctionTracer tracer(__FILE__, "ISAMutator::initFromEnv");
   
   // Load config from environment (with automatic display when DEBUG=1)
   cfg_ = loadConfig();
   
   // Load ISA schema (required)
   if (cfg_.isa_name.empty()) {
-  std::fprintf(hwfuzz::harness_log(), "[ERROR] No ISA name specified in config\n");
+    hwfuzz::debug::logError("No ISA name specified in config\n");
     std::exit(1);
   }
   
@@ -43,30 +35,159 @@ void ISAMutator::initFromEnv() {
   isa_ = isa::load_isa_config(cfg_.isa_name);
   
   if (isa_.instructions.empty()) {
-    std::fprintf(hwfuzz::harness_log(), "[ERROR] No instructions in schema for ISA '%s'\n", cfg_.isa_name.c_str());
+    hwfuzz::debug::logError("No instructions in schema for ISA '%s'\n", cfg_.isa_name.c_str());
     std::exit(1);
   }
   
-  use_schema_ = true;
   word_bytes_ = std::max<uint32_t>(1, isa_.base_width / 8);
-  //FIXME - Have to Fix Later
-  std::fprintf(hwfuzz::harness_log(), "[INFO] Loaded ISA '%s': %zu instructions\n", isa_.isa_name.c_str(), isa_.instructions.size());
+  hwfuzz::debug::logInfo("Loaded ISA '%s': %zu instructions\n", isa_.isa_name.c_str(), isa_.instructions.size());
 }
 
 unsigned char *ISAMutator::mutateStream(unsigned char *in, size_t in_len,
                                            unsigned char *out_buf, size_t max_size) {
-  debug::FunctionTracer tracer(__FILE__, "ISAMutator::mutateStream");
+  hwfuzz::debug::FunctionTracer tracer(__FILE__, "ISAMutator::mutateStream");
   (void)out_buf;
-  return use_schema_ ? mutateWithSchema(in, in_len, nullptr, max_size)
-                     : mutateFallback(in, in_len, nullptr, max_size);
+  return applyMutations(in, in_len, nullptr, max_size);
 }
 
-unsigned char *ISAMutator::mutateWithSchema(unsigned char *in, size_t in_len,
-                                               unsigned char *, size_t max_size) {
-  debug::FunctionTracer tracer(__FILE__, "ISAMutator::mutateWithSchema");
-  if (isa_.instructions.empty())
-    return nullptr;
-
+/**
+ * @brief Apply ISA-aware mutations to an instruction stream
+ * 
+ * This is the core mutation engine that transforms input instruction streams through
+ * intelligent, schema-driven mutations. It operates in several phases:
+ * 1. Memory allocation and size constraint enforcement
+ * 2. Input processing and exit stub detection
+ * 3. Dynamic payload size randomization
+ * 4. Random mutation application (REPLACE/INSERT/DELETE/DUPLICATE)
+ * 5. Exit stub appending for clean termination
+ * 
+ * @param in Input instruction buffer to mutate (unmodified by this function)
+ * @param in_len Length of input buffer in bytes
+ * @param out_buf Unused output buffer parameter (ignored, function allocates own buffer)
+ * @param max_size Maximum size constraint for output (soft limit, may be exceeded if too small)
+ * 
+ * @return Pointer to newly allocated mutated buffer, or nullptr on allocation failure
+ * 
+ * @note Caller must free() the returned buffer
+ * @note Function enforces minimum 16 instructions (64 bytes) and maximum 512 instructions (2048 bytes)
+ * @note Exit stub (16 bytes) is always appended after mutations
+ * 
+ * @details
+ * **Phase 1: Buffer Setup**
+ * - Allocates output buffer with capacity for max payload (2048 bytes) + exit stub (16 bytes)
+ * - Enforces minimum capacity of 80 bytes (16 instructions + exit stub)
+ * - Ignores max_size if it's too small for valid programs
+ * 
+ * **Phase 2: Input Processing**
+ * - Copies input to output buffer (up to capacity limits)
+ * - Detects and excludes existing exit stub from mutation region
+ * - Zero-initializes if no valid input provided
+ * 
+ * **Phase 3: Size Randomization**
+ * - Dynamically adjusts program length between 16-512 instructions
+ * - Growth bias: 50% chance to grow by 0-200 instructions
+ * - Shrink bias: 30% chance to shrink by 0-100 instructions
+ * - Keep size: 20% chance to maintain current size
+ * - Always grows when at minimum (avoids staying at 16 instructions)
+ * 
+ * **Phase 4: Mutation Application**
+ * - Applies 1-50 random mutations per call
+ * - Four mutation strategies (25% probability each):
+ *   - REPLACE (strategy 0): Overwrites existing instruction with new random instruction
+ *   - INSERT (strategy 1): Inserts new instruction at random position, shifts subsequent instructions forward
+ *   - DELETE (strategy 2): Removes instruction at random position, shifts subsequent instructions backward
+ *   - DUPLICATE (strategy 3): Copies existing instruction to new position, shifts subsequent instructions forward
+ * - Validates mutated instructions against ISA legality rules (skips illegal mutations)
+ * 
+ * **Phase 5: Finalization**
+ * - Appends 4-instruction exit stub (16 bytes) at end of payload
+ * - Updates last_len_ for AFL++ to query via last_out_len()
+ * 
+ * @example Basic Usage
+ * @code
+ * ISAMutator mutator;
+ * mutator.initFromEnv();
+ * 
+ * // Input: 20 instructions (80 bytes for RV32)
+ * unsigned char input[80] = { ... };
+ * 
+ * // Perform mutation
+ * unsigned char* output = mutator.applyMutations(input, 80, nullptr, 4096);
+ * if (output) {
+ *   size_t output_size = mutator.last_out_len();
+ *   // output_size might be: (20 ± mutations + 4 exit stub) * 4 bytes
+ *   // Example: 25 payload + 4 stub = 29 instructions = 116 bytes
+ *   
+ *   // Use mutated buffer...
+ *   execute_testcase(output, output_size);
+ *   
+ *   // Free allocated buffer
+ *   std::free(output);
+ * }
+ * @endcode
+ * 
+ * @example Mutation Flow Example
+ * @code
+ * // Input: 20 instructions [I0, I1, I2, ..., I19]
+ * 
+ * // Phase 3: Size randomization decides to grow to 25 instructions
+ * // - Adds 5 random instructions at end: [I0...I19, R0, R1, R2, R3, R4]
+ * 
+ * // Phase 4: Apply 10 mutations
+ * // Mutation 1 (REPLACE): Replace I5 with new random instruction
+ * //   Result: [I0, I1, I2, I3, I4, R5, I6, ..., R4]
+ * 
+ * // Mutation 2 (INSERT): Insert new instruction at position 3
+ * //   Result: [I0, I1, I2, R6, I3, I4, R5, I6, ..., R4] (now 26 instructions)
+ * 
+ * // Mutation 3 (DELETE): Remove instruction at position 10
+ * //   Result: [I0, I1, I2, R6, I3, I4, R5, I6, I7, I8, I10, ..., R4] (now 25 instructions)
+ * 
+ * // Mutation 4 (DUPLICATE): Copy instruction at position 5 to position 15
+ * //   Result: [I0, I1, I2, R6, I3, I4, R5, I6, I7, I8, I10, ..., I4, ...] (now 26 instructions)
+ * 
+ * // ... 6 more mutations ...
+ * 
+ * // Phase 5: Append exit stub (4 instructions)
+ * //   Final: [mutated 26 instructions, EXIT_0, EXIT_1, EXIT_2, EXIT_3]
+ * //   Total: 30 instructions = 120 bytes
+ * @endcode
+ * 
+ * @example Edge Cases
+ * @code
+ * // Case 1: Empty input
+ * unsigned char* out = mutator.applyMutations(nullptr, 0, nullptr, 4096);
+ * // Result: Generates 16-512 random instructions + exit stub
+ * 
+ * // Case 2: Input with existing exit stub
+ * unsigned char input_with_stub[84];  // 20 instructions + stub
+ * unsigned char* out = mutator.applyMutations(input_with_stub, 84, nullptr, 4096);
+ * // Result: Detects stub, mutates only first 20 instructions, appends fresh stub
+ * 
+ * // Case 3: Too large input
+ * unsigned char huge_input[3000];  // 750 instructions (exceeds max)
+ * unsigned char* out = mutator.applyMutations(huge_input, 3000, nullptr, 4096);
+ * // Result: Truncates to 512 instructions (2048 bytes), then mutates
+ * 
+ * // Case 4: Tiny max_size constraint
+ * unsigned char input[80];
+ * unsigned char* out = mutator.applyMutations(input, 80, nullptr, 32);  // max_size too small
+ * // Result: Ignores max_size, uses default capacity (2064 bytes) to generate valid programs
+ * @endcode
+ * 
+ * @warning Exit stub is ALWAYS appended - do not include it in input payload
+ * @warning Returned buffer is malloc'd - caller MUST free() it to prevent memory leaks
+ * @warning Function may return nullptr on allocation failure - always check return value
+ * 
+ * @see mutateStream() - Public wrapper that calls this function
+ * @see pickInstruction() - Selects random instruction from ISA schema
+ * @see encodeInstruction() - Encodes instruction spec to binary format
+ * @see exit_stub::append_exit_stub() - Appends termination sequence
+ */
+unsigned char *ISAMutator::applyMutations(unsigned char *in, size_t in_len,
+                                          unsigned char *, size_t max_size) {
+  hwfuzz::debug::FunctionTracer tracer(__FILE__, "ISAMutator::applyMutations");
+  
   size_t word_bytes = std::max<size_t>(1, word_bytes_);
   constexpr size_t exit_stub_bytes = exit_stub::EXIT_STUB_INSN_COUNT * 4;
   constexpr size_t min_payload_insns = 16;
@@ -227,83 +348,14 @@ unsigned char *ISAMutator::mutateWithSchema(unsigned char *in, size_t in_len,
   return out;
 }
 
-unsigned char *ISAMutator::mutateFallback(unsigned char *in, size_t in_len,
-                                             unsigned char *, size_t max_size) {
-  debug::FunctionTracer tracer(__FILE__, "ISAMutator::mutateFallback");
-  constexpr size_t exit_stub_bytes = exit_stub::EXIT_STUB_INSN_COUNT * 4;
-  constexpr size_t min_payload_bytes = 16 * 4;  // 16 instructions minimum
-  constexpr size_t max_payload_bytes = 512 * 4; // 512 instructions maximum
-  
-  size_t cap = max_size ? max_size : (max_payload_bytes + exit_stub_bytes);
-  cap = std::max(cap, min_payload_bytes + exit_stub_bytes);
-  
-  unsigned char *out = static_cast<unsigned char *>(std::malloc(cap));
-  if (!out)
-    return nullptr;
-
-  size_t payload_cap = cap - exit_stub_bytes;
-  size_t cur_len = std::min(in_len, payload_cap);
-  if (cur_len && in) {
-    std::memcpy(out, in, cur_len);
-  } else {
-    out[0] = 0;
-    cur_len = 1;
-  }
-
-  // Ensure minimum payload size (16 instructions)
-  if (cur_len < min_payload_bytes) {
-    size_t bytes_needed = min_payload_bytes - cur_len;
-    std::memset(out + cur_len, 0, bytes_needed);
-    cur_len = min_payload_bytes;
-  }
-
-  uint32_t total_weight = 0;
-  for (const auto &rule : rules_)
-    total_weight += rule.weight;
-  total_weight = std::max<uint32_t>(1, total_weight);
-
-  unsigned nmuts = 1 + (Random::rnd32() % 3);
-  for (unsigned i = 0; i < nmuts; ++i) {
-    uint32_t pick = Random::range(total_weight);
-    uint32_t acc = 0;
-    
-    for (const auto &rule : rules_) {
-      acc += rule.weight;
-      if (pick < acc) {
-        applyRule(rule, out, cur_len, payload_cap);
-        
-        // Enforce size limits after rule application
-        if (cur_len < min_payload_bytes) {
-          size_t bytes_needed = min_payload_bytes - cur_len;
-          std::memset(out + cur_len, 0, bytes_needed);
-          cur_len = min_payload_bytes;
-        } else if (cur_len > max_payload_bytes) {
-          cur_len = max_payload_bytes;
-        }
-        
-        break;
-      }
-    }
-  }
-
-  // Append exit stub after fallback mutations
-  exit_stub::append_exit_stub(out, cur_len);
-  cur_len += exit_stub_bytes;
-
-  last_len_ = cur_len;
-  return out;
-}
-
 const isa::InstructionSpec &ISAMutator::pickInstruction() const {
-  debug::FunctionTracer tracer(__FILE__, "ISAMutator::pickInstruction");
-  if (isa_.instructions.empty())
-    throw std::runtime_error("No instructions available");
+  hwfuzz::debug::FunctionTracer tracer(__FILE__, "ISAMutator::pickInstruction");
   uint32_t idx = Random::range(static_cast<uint32_t>(isa_.instructions.size()));
   return isa_.instructions[idx];
 }
 
 uint32_t ISAMutator::encodeInstruction(const isa::InstructionSpec &spec) const {
-  debug::FunctionTracer tracer(__FILE__, "ISAMutator::encodeInstruction");
+  hwfuzz::debug::FunctionTracer tracer(__FILE__, "ISAMutator::encodeInstruction");
   auto fmt_it = isa_.formats.find(spec.format);
   if (fmt_it == isa_.formats.end())
     return Random::rnd32();
@@ -340,7 +392,7 @@ int64_t getSignedRandom(uint32_t width) {
 
 uint32_t ISAMutator::randomFieldValue(const std::string &field_name,
                                         const isa::FieldEncoding &enc) const {
-  debug::FunctionTracer tracer(__FILE__, "ISAMutator::randomFieldValue");
+  hwfuzz::debug::FunctionTracer tracer(__FILE__, "ISAMutator::randomFieldValue");
   if (enc.width == 0)
     return 0;
 
@@ -379,7 +431,7 @@ uint32_t ISAMutator::randomFieldValue(const std::string &field_name,
 }
 
 void ISAMutator::applyField(uint32_t &word, const isa::FieldEncoding &enc, uint32_t value) const {
-  debug::FunctionTracer tracer(__FILE__, "ISAMutator::applyField");
+  hwfuzz::debug::FunctionTracer tracer(__FILE__, "ISAMutator::applyField");
   if (enc.segments.empty())
     return;
 
@@ -396,7 +448,7 @@ void ISAMutator::applyField(uint32_t &word, const isa::FieldEncoding &enc, uint3
 }
 
 uint32_t ISAMutator::readWord(const unsigned char *buf, size_t offset) const {
-  debug::FunctionTracer tracer(__FILE__, "ISAMutator::readWord");
+  hwfuzz::debug::FunctionTracer tracer(__FILE__, "ISAMutator::readWord");
   if (word_bytes_ == 2)
     return internal::load_u16_le(buf, offset);
   else if (word_bytes_ == 4)
@@ -410,7 +462,7 @@ uint32_t ISAMutator::readWord(const unsigned char *buf, size_t offset) const {
 }
 
 void ISAMutator::writeWord(unsigned char *buf, size_t offset, uint32_t word) const {
-  debug::FunctionTracer tracer(__FILE__, "ISAMutator::writeWord");
+  hwfuzz::debug::FunctionTracer tracer(__FILE__, "ISAMutator::writeWord");
   if (word_bytes_ == 2)
     internal::store_u16_le(buf, offset, static_cast<uint16_t>(word));
   else if (word_bytes_ == 4)
@@ -418,99 +470,6 @@ void ISAMutator::writeWord(unsigned char *buf, size_t offset, uint32_t word) con
   else
     for (uint32_t i = 0; i < word_bytes_ && i < 4; ++i)
       buf[offset + i] = static_cast<unsigned char>((word >> (8 * i)) & 0xFF);
-}
-
-std::string ISAMutator::trim(const std::string &s) {
-  debug::FunctionTracer tracer(__FILE__, "ISAMutator::trim");
-  auto begin = s.find_first_not_of(" \t\n\r");
-  if (begin == std::string::npos)
-    return "";
-  auto end = s.find_last_not_of(" \t\n\r");
-  return s.substr(begin, end - begin + 1);
-}
-
-bool ISAMutator::loadFallbackConfig(const std::string &path) {
-  debug::FunctionTracer tracer(__FILE__, "ISAMutator::loadFallbackConfig");
-  std::ifstream ifs(path);
-  if (!ifs)
-    return false;
-
-  rules_.clear();
-  Rule *cur = nullptr;
-  std::string line;
-  
-  while (std::getline(ifs, line)) {
-    std::string s = trim(line);
-    if (s.empty() || s[0] == '#')
-      continue;
-      
-    if (s.find("type:") == 0 || s.find("- type:") == 0) {
-      rules_.push_back(Rule{});
-      cur = &rules_.back();
-      cur->type = trim(s.substr(s.find(':') + 1));
-    } else if (cur) {
-      if (s.find("weight:") == 0)
-        cur->weight = std::stoul(trim(s.substr(7)));
-      else if (s.find("min:") == 0)
-        cur->min = std::stoul(trim(s.substr(4)));
-      else if (s.find("max:") == 0)
-        cur->max = std::stoul(trim(s.substr(4)));
-      else if (s.find("count:") == 0) {
-        std::string v = trim(s.substr(6));
-        size_t dash = v.find('-');
-        if (dash == std::string::npos)
-          cur->min = cur->max = std::stoul(v);
-        else {
-          cur->min = std::stoul(trim(v.substr(0, dash)));
-          cur->max = std::stoul(trim(v.substr(dash + 1)));
-        }
-      } else if (s.find("pattern:") == 0)
-        cur->pattern = internal::parse_pattern(trim(s.substr(8)));
-    }
-  }
-  return !rules_.empty();
-}
-
-void ISAMutator::applyRule(const Rule &r, unsigned char *buf, size_t &len, size_t cap) {
-  debug::FunctionTracer tracer(__FILE__, "ISAMutator::applyRule");
-  uint32_t n = r.min + (r.max > r.min ? Random::range(r.max - r.min + 1) : 0);
-  
-  if (r.type == "byte_flip") {
-    for (uint32_t i = 0; i < n && len > 0; ++i) {
-      size_t idx = Random::range(static_cast<uint32_t>(len));
-      buf[idx] ^= (1 << Random::range(8));
-    }
-  }
-  else if (r.type == "insert_pattern" && !r.pattern.empty() && len < cap) {
-    size_t pos = len ? Random::range(static_cast<uint32_t>(len + 1)) : 0;
-    size_t patlen = std::min(r.pattern.size(), cap - len);
-    std::memmove(buf + pos + patlen, buf + pos, len - pos);
-    std::memcpy(buf + pos, r.pattern.data(), patlen);
-    len = std::min(len + patlen, cap);
-  }
-  else if (r.type == "swap_chunks" && len >= 2) {
-    size_t a = Random::range(static_cast<uint32_t>(len));
-    size_t b = Random::range(static_cast<uint32_t>(len));
-    size_t sz = 1 + Random::range(static_cast<uint32_t>(std::max<size_t>(1, len / 8)));
-    size_t asz = std::min(sz, len - a);
-    size_t bsz = std::min(sz, len - b);
-    std::vector<uint8_t> tmp(asz);
-    std::memcpy(tmp.data(), buf + a, asz);
-    std::memmove(buf + a, buf + b, bsz);
-    std::memcpy(buf + b, tmp.data(), asz);
-  }
-  else if (r.type == "truncate" && len > 0) {
-    len = (n >= len) ? 1 : len - n;
-  }
-  else if (r.type == "duplicate_chunk" && len > 0 && len < cap) {
-    size_t pos = Random::range(static_cast<uint32_t>(len));
-    size_t sz = 1 + Random::range(static_cast<uint32_t>(std::min<size_t>(len - pos, 4)));
-    size_t inspos = Random::range(static_cast<uint32_t>(len + 1));
-    size_t copylen = std::min(sz, cap - len);
-    std::memmove(buf + inspos + copylen, buf + inspos, len - inspos);
-    std::memcpy(buf + inspos, buf + pos, copylen);
-    len = std::min(len + copylen, cap);
-  }
 }
 
 } // namespace fuzz::mutator

@@ -1,17 +1,29 @@
-# Sample profile targeting the RV32E ISA subset.
-strategy: IR
-verbose: false
-enable_c: false
-
-probabilities:
-  decode: 55
-  imm_random: 35
-
-weights:
-  r_base_alu: 75
-  r_m: 0
+# Configuration for RV32E ISA subset (reduced register set: x0-x15 only)
+# Strategy: INSTRUCTION_LEVEL uses schema-driven mutations for ISA-aware fuzzing
+strategy: INSTRUCTION_LEVEL
 
 schemas:
   isa: rv32e
   root: ./schemas
   map: isa_map.yaml
+
+# ============================================================================
+# RESERVED FIELDS (for future enhancements - see FUTUREWORK.md)
+# ============================================================================
+# verbose: false                    # Reserved: Verbose logging control
+# enable_c: false                   # Reserved: Disable RVC for this profile
+#
+# probabilities:                    # Reserved: Mutation tuning
+#   decode: 55                      # Reserved: Schema-based mutation rate
+#   imm_random: 35                  # Reserved: Random immediate probability
+#
+# weights:                          # Reserved: RV32E has no M-extension
+#   r_base_alu: 75                  # Reserved: Base ALU weight
+#   r_m: 0                          # Reserved: Zero M-extension weight (not present)
+#
+# constraints:                      # Reserved: RV32E-specific constraints
+#   register_count: 16              # Reserved: RV32E uses only x0-x15
+#
+# See ../FUTUREWORK.md for implementation plans
+# ============================================================================
+

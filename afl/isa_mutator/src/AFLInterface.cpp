@@ -9,7 +9,7 @@
 
 #include <hwfuzz/Log.hpp>
 
-#include <fuzz/mutator/DebugUtils.hpp>
+#include <hwfuzz/Debug.hpp>
 #include <fuzz/mutator/ISAMutator.hpp>
 #include <fuzz/mutator/Random.hpp>
 
@@ -24,16 +24,16 @@ std::mutex &cli_mutex() {
 
 const char *strategy_token(mut::Strategy strategy) {
   switch (strategy) {
-  case mut::Strategy::RAW:
-    return "RAW";
-  case mut::Strategy::IR:
-    return "IR";
-  case mut::Strategy::HYBRID:
-    return "HYBRID";
-  case mut::Strategy::AUTO:
-    return "AUTO";
+  case mut::Strategy::BYTE_LEVEL:
+    return "BYTE_LEVEL";
+  case mut::Strategy::INSTRUCTION_LEVEL:
+    return "INSTRUCTION_LEVEL";
+  case mut::Strategy::MIXED_MODE:
+    return "MIXED_MODE";
+  case mut::Strategy::ADAPTIVE:
+    return "ADAPTIVE";
   }
-  return "IR";
+  return "INSTRUCTION_LEVEL";
 }
 
 std::string &cli_config_path() {
@@ -73,8 +73,7 @@ void mutator_set_config_path(const char *path) {
 int afl_custom_init(void * /*afl*/) {
   (void)get_mutator();
   mut::Random::seed(static_cast<uint32_t>(time(nullptr)));
-  std::fprintf(hwfuzz::harness_log(),
-               "[INFO] custom mutator initialized. pid=%d time=%ld\n",
+  hwfuzz::debug::logInfo("[MUTATOR] Custom mutator initialized. pid=%d time=%ld\n",
                static_cast<int>(getpid()),
                static_cast<long>(time(nullptr)));
   return 0;
@@ -88,8 +87,8 @@ const char *mutator_get_active_strategy() {
 }
 
 void afl_custom_deinit(void) {
-  std::fprintf(hwfuzz::harness_log(), "[] deinit\n");
-  fuzz::mutator::debug::deinit();
+  hwfuzz::debug::logInfo("[MUTATOR] Deinit\n");
+  // Debug system cleanup handled automatically
 }
 
 size_t afl_custom_mutator(void * /*afl*/,

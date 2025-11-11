@@ -17,33 +17,34 @@ set -euo pipefail
 
 # ---------- Defaults (match your repo) ----------
 PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"           # project root dir usually is script's dir
+export PROJECT_ROOT  # Export so ISA mutator can find schemas
 AFL_DIR="$PROJECT_ROOT/afl"
 FUZZ_BIN="$AFL_DIR/afl_picorv32"
 MUTATOR_SO="$AFL_DIR/isa_mutator/libisa_mutator.so"
 MUTATOR_CONFIG="$PROJECT_ROOT/afl/isa_mutator/config/mutator.default.yaml"
 
-STAMP="$(date +"%d-%b__%H-%M")"
-
 SEEDS_DIR="$PROJECT_ROOT/seeds"
-RUNS_DIR_DEFAULT="$PROJECT_ROOT/workdir"
-RUNS_DIR="$RUNS_DIR_DEFAULT"     # may be overridden by --runs
-RUN_DIR=""                        # computed after args
+RUN_DIR="$PROJECT_ROOT/workdir"   # Fixed directory name, no timestamp
 CORPORA_DIR=""                    # computed after args
 LOG_FILE=""                       # computed after args
 
 # Crash logs inside run dir
 CRASH_DIR=""                      # computed after args
 
+# Backup flag
+BACKUP_WORKDIR=0
+
 # ---------- Configurable params ----------
 CORES="${CORES:-1}"
 MEM_LIMIT="${MEM_LIMIT:-4G}"        # e.g., 4G or 'none'
 TIMEOUT="${TIMEOUT:-100000}"       # ms or 'none'
-DEBUG="${DEBUG:-0}"
+DEBUG="${DEBUG:-0}"                # ISA mutator & harness debug logging
 MAX_CYCLES="${MAX_CYCLES:-50000}"
+UI_MODE="${UI_MODE:-auto}"         # auto | on | off (AFL++ status screen)
 
 NO_BUILD=0
 AFL_EXTRA_ARGS=""
-AFL_DEBUG_FLAG=0
+AFL_DEBUG="${AFL_DEBUG:-0}"        # AFL++ debug output (separate from DEBUG)
 
 # ---------- Helpers ----------
 usage() {
@@ -51,31 +52,38 @@ usage() {
 Usage: $0 [options]
 
 Options:
-  -c, --cores N            Number of AFL workers (default: ${CORES})
-  -m, --mem LIMIT          AFL memory limit, e.g. 4G or 'none' (default: ${MEM_LIMIT})
-  -t, --timeout MS         AFL timeout in ms or 'none' (default: ${TIMEOUT})
-      --seeds DIR          Input seeds dir (default: ${SEEDS_DIR})
-  -o, --out DIR            AFL corpora/output dir (if omitted, uses a timestamped run dir)
-      --runs DIR           Base directory to store timestamped runs (default: ${RUNS_DIR_DEFAULT})
-      --mutator PATH       Custom mutator .so (default: ${MUTATOR_SO})
-      --mutator-config PATH  Path to mutator config YAML file (default: afl/isa_mutator/config/mutator.default.yaml)
-      --bin PATH           Harness binary (default: ${FUZZ_BIN})
-      --afl-args "ARGS"    Extra args passed to afl-fuzz (e.g. "-d -x dict")
-      --no-build           Skip building mutator/harness (assume ready)
-      --debug              Enable mutator debug (DEBUG=1) and AFL_DEBUG=1
-      --max-cycles N       Pass MAX_CYCLES to harness
-      --golden MODE        GOLDEN_MODE = live | off | batch | replay (default: live)
-      --spike PATH         Path to Spike binary (SPIKE_BIN)
-      --objcopy PATH       Path to objcopy (OBJCOPY_BIN)
-      --isa STR            Spike ISA string, e.g., rv32imc (SPIKE_ISA)
-      --trace-mode on|off  Enable/disable harness trace writing (default: on)
-      --exec-backend B     EXEC_BACKEND = verilator | fpga (default: verilator)
-  -h, --help               Show this help and exit
+  -c, --cores N               Number of AFL workers (default: ${CORES})
+  -m, --mem LIMIT             AFL memory limit, e.g. 4G or 'none' (default: ${MEM_LIMIT})
+  -t, --timeout MS            AFL timeout in ms or 'none' (default: ${TIMEOUT})
+      --seeds DIR             Input seeds dir (default: ${SEEDS_DIR})
+  -o, --out DIR               AFL corpora/output dir (if omitted, uses workdir/corpora)
+      --mutator PATH          Custom mutator .so (default: ${MUTATOR_SO})
+      --mutator-config PATH   Path to mutator config YAML file (default: afl/isa_mutator/config/mutator.default.yaml)
+      --bin PATH              Harness binary (default: ${FUZZ_BIN})
+      --afl-args "ARGS"       Extra args passed to afl-fuzz (e.g. "-d -x dict")
+      --no-build              Skip building mutator/harness (assume ready)
+  -bk, --backup               Backup current workdir before starting new run (creates workdir.backup.<timestamp>)
+      --debug                 Enable ISA mutator & harness debug logging (DEBUG=1)
+      --afl-debug             Enable AFL++ debug output (AFL_DEBUG=1) - very verbose
+      --ui-mode MODE          AFL++ UI mode: auto (default) | on | off
+      --max-cycles N          Pass MAX_CYCLES to harness
+      --golden MODE           GOLDEN_MODE = live | off | batch | replay (default: live)
+      --spike PATH            Path to Spike binary (SPIKE_BIN)
+      --objcopy PATH          Path to objcopy (OBJCOPY_BIN)
+      --isa STR               Spike ISA string, e.g., rv32imc (SPIKE_ISA)
+      --trace-mode on|off     Enable/disable harness trace writing (default: on)
+      --exec-backend B        EXEC_BACKEND = verilator | fpga (default: verilator)
+  -h, --help                  Show this help and exit
 
 Examples:
-  $0 --cores 8 --strategy RAW --timeout 500 --debug
-  $0 -c 4 -s HYBRID -m none -t none --seeds ./seeds
+  $0 --cores 8 --timeout 500 --debug          # Enable mutator/harness debug only
+  $0 -c 4 -m none -t none --seeds ./seeds
   $0 --no-build
+  $0 -bk --cores 8                             # Backup workdir before starting
+  $0 --ui-mode off                             # Disable AFL++ TUI (for logging/scripts)
+  $0 --ui-mode on                              # Force AFL++ TUI display
+  $0 --afl-debug                               # Enable AFL++ verbose debug output
+  $0 --debug --afl-debug                       # Enable both (very chatty!)
   $0 --afl-args "-d -M main"
 EOF
 }
@@ -90,13 +98,15 @@ while [[ $# -gt 0 ]]; do
     -t|--timeout)      TIMEOUT="$2"; shift 2 ;;
     --seeds)           SEEDS_DIR="$(realpath -m "$2")"; shift 2 ;;
     --out)             CORPORA_DIR="$(realpath -m "$2")"; shift 2 ;;
-    --runs)            RUNS_DIR="$(realpath -m "$2")"; shift 2 ;;
     --mutator)         MUTATOR_SO="$(realpath -m "$2")"; shift 2 ;;
     --mutator-config)  MUTATOR_CONFIG="$(realpath -m "$2")"; shift 2 ;;
     --bin)             FUZZ_BIN="$(realpath -m "$2")"; shift 2 ;;
     --afl-args)        AFL_EXTRA_ARGS="$2"; shift 2 ;;
     --no-build)        NO_BUILD=1; shift ;;
-    --debug)           DEBUG=1; AFL_DEBUG_FLAG=1; shift ;;
+    -bk|--backup)      BACKUP_WORKDIR=1; shift ;;
+    --debug)           DEBUG=1; shift ;;
+    --afl-debug)       AFL_DEBUG=1; shift ;;
+    --ui-mode)         UI_MODE="$2"; shift 2 ;;
     --max-cycles)      MAX_CYCLES="$2"; shift 2 ;;
     --golden)          GOLDEN_MODE="$2"; shift 2 ;;
     --spike)           SPIKE_BIN="$(realpath -m "$2")"; shift 2 ;;
@@ -108,6 +118,16 @@ while [[ $# -gt 0 ]]; do
     *) log "[!] Unknown option: $1"; usage; exit 1 ;;
   esac
 done
+
+# ---------- Validate UI mode ----------
+case "$UI_MODE" in
+  auto|on|off) ;; # Valid values
+  *)
+    log "[!] ERROR: Invalid --ui-mode value: '$UI_MODE'" >&2
+    log "    Valid options: auto, on, off" >&2
+    exit 1
+    ;;
+esac
 
 # ---------- Derived paths & run dir ----------
 # Load memory configuration from centralized config file
@@ -135,31 +155,42 @@ export TOHOST_ADDR
 # Calculate RAM_SIZE_BYTES decimal value for display
 RAM_SIZE_BYTES_DEC=$((RAM_SIZE_BYTES))
 
-RUN_DIR="${RUNS_DIR}/${STAMP}"
+# ---------- Backup existing workdir if requested ----------
+if [[ "$BACKUP_WORKDIR" -eq 1 && -d "$RUN_DIR" ]]; then
+  BACKUP_STAMP="$(date +"%Y%m%d_%H%M%S")"
+  BACKUP_DIR="${RUN_DIR}.backup.${BACKUP_STAMP}"
+  log "[BACKUP] Creating backup of existing workdir..."
+  log "         From: $RUN_DIR"
+  log "         To:   $BACKUP_DIR"
+  
+  if mv "$RUN_DIR" "$BACKUP_DIR"; then
+    log "[BACKUP] ✓ Backup successful"
+  else
+    log "[!] ERROR: Failed to backup workdir" >&2
+    exit 1
+  fi
+fi
+
+# ---------- Create workdir structure ----------
 mkdir -p "$RUN_DIR" "$SEEDS_DIR"
 
-# If user didn't force an output dir, put corpora inside the run dir
+# If user didn't force an output dir, put corpora inside workdir
 if [[ -z "${CORPORA_DIR}" ]]; then
   CORPORA_DIR="${RUN_DIR}/corpora"
 fi
 mkdir -p "$CORPORA_DIR"
 
 LOG_FILE="${RUN_DIR}/fuzz.log"
-SPIKE_LOG_FILE="${RUN_DIR}/spike.log"
-CRASH_DIR="${RUN_DIR}/logs/crash"
-mkdir -p "$CRASH_DIR"
-echo "[SETUP] Crash logs will go to: $CRASH_DIR"
 
-# Optional traces directory inside run dir (for VCD/log triage)
-TRACES_DIR="${RUN_DIR}/traces"
-mkdir -p "$TRACES_DIR"
-
-# Combined log for both ISA mutator and AFL harness
-# All harness/mutator output goes here - only AFL++ uses stdout/stderr
+# Runtime log directory for unified logging (replaces old harness.log)
+# All mutator and harness logs go to: ${LOGS_DIR}/runtime.log
 LOGS_DIR="${RUN_DIR}/logs"
 mkdir -p "$LOGS_DIR"
-HARNESS_STDIO_LOG="${LOGS_DIR}/harness.log"
-: > "$HARNESS_STDIO_LOG"
+
+SPIKE_LOG_FILE="${LOGS_DIR}/spike.log"
+CRASH_DIR="${LOGS_DIR}/crash"
+mkdir -p "$CRASH_DIR"
+echo "[SETUP] Crash logs will go to: $CRASH_DIR"
 
 # ---------- Load fuzzer environment configuration ----------
 FUZZER_ENV="${PROJECT_ROOT}/fuzzer.env"
@@ -189,10 +220,8 @@ export SCHEMA_DIR="${SCHEMA_DIR:-$PROJECT_ROOT/schemas}"
 
 # Propagate crash directory to harness using the name it expects
 export CRASH_LOG_DIR="$CRASH_DIR"
-export TRACE_DIR="$TRACES_DIR"
 export SPIKE_LOG_FILE
 export LINKER_SCRIPT="${LINKER_SCRIPT:-$PROJECT_ROOT/tools/link.ld}"
-export HARNESS_STDIO_LOG
 
 # Golden/trace/backend defaults (from fuzzer.env or CLI overrides)
 export GOLDEN_MODE="${GOLDEN_MODE:-live}"
@@ -270,13 +299,30 @@ if [[ -n "${LD_BIN:-}" ]];      then export LD_BIN; fi
 export PC_STAGNATION_LIMIT MAX_PROGRAM_WORDS STOP_ON_SPIKE_DONE APPEND_EXIT_STUB
 
 # Preserve these env vars in the target (space-separated list for AFL++)
-export AFL_KEEP_ENV="CRASH_LOG_DIR TRACE_DIR MAX_CYCLES DEBUG GOLDEN_MODE EXEC_BACKEND TRACE_MODE SPIKE_BIN SPIKE_ISA OBJCOPY_BIN OBJDUMP_BIN LD_BIN SPIKE_LOG_FILE LINKER_SCRIPT HARNESS_STDIO_LOG TOHOST_ADDR PC_STAGNATION_LIMIT MAX_PROGRAM_WORDS STOP_ON_SPIKE_DONE APPEND_EXIT_STUB RAM_BASE RAM_SIZE PROGADDR_RESET PROGADDR_IRQ STACK_ADDR STACKADDR MUTATOR_CONFIG SCHEMA_DIR"
+export AFL_KEEP_ENV="CRASH_LOG_DIR MAX_CYCLES DEBUG GOLDEN_MODE EXEC_BACKEND TRACE_MODE SPIKE_BIN SPIKE_ISA OBJCOPY_BIN OBJDUMP_BIN LD_BIN SPIKE_LOG_FILE LINKER_SCRIPT TOHOST_ADDR PC_STAGNATION_LIMIT MAX_PROGRAM_WORDS STOP_ON_SPIKE_DONE APPEND_EXIT_STUB RAM_BASE RAM_SIZE PROGADDR_RESET PROGADDR_IRQ STACK_ADDR STACKADDR MUTATOR_CONFIG SCHEMA_DIR"
 
-# Optional AFL debug (very chatty)
-if [[ "$AFL_DEBUG_FLAG" == "1" ]]; then
+# Optional AFL debug output (very verbose - separate from mutator/harness DEBUG)
+if [[ "$AFL_DEBUG" == "1" ]]; then
   export AFL_DEBUG=1
   export AFL_DEBUG_CHILD=1
+  log "[DEBUG] AFL++ debug output enabled (AFL_DEBUG=1)"
 fi
+
+# Configure AFL++ UI mode
+case "$UI_MODE" in
+  off)
+    export AFL_NO_UI=1
+    log "[UI] AFL++ status screen disabled (AFL_NO_UI=1)"
+    ;;
+  on)
+    export AFL_FORCE_UI=1
+    log "[UI] AFL++ status screen forced on (AFL_FORCE_UI=1)"
+    ;;
+  auto)
+    # Default behavior - AFL++ auto-detects TTY
+    log "[UI] AFL++ UI mode: auto (default TTY detection)"
+    ;;
+esac
 
 # Disable core dumps to avoid core_pattern warnings during AFL++ fuzzing runs
 ulimit -c 0 || true
@@ -306,15 +352,17 @@ cat <<BANNER
   Mutator SO   : $MUTATOR_SO
   Mutator Cfg  : $MUTATOR_CONFIG
   Harness Bin  : $FUZZ_BIN
-  Debug        : $DEBUG (AFL_DEBUG=$AFL_DEBUG_FLAG)
+  Debug        : Mutator/Harness=$DEBUG | AFL++=$AFL_DEBUG
+  UI Mode      : $UI_MODE
   Cores        : $CORES
   Timeout      : $TIMEOUT
   Mem Limit    : $MEM_LIMIT
   Seeds Dir    : $SEEDS_DIR
   Output Dir   : $CORPORA_DIR
+  Work Dir     : $RUN_DIR
   Run Log      : $LOG_FILE
   Spike Log    : $SPIKE_LOG_FILE
-  Harness+Mutator Log : $HARNESS_STDIO_LOG
+  Runtime Log  : ${LOGS_DIR}/runtime.log
   Max Cycles   : $MAX_CYCLES
   RAM Base     : $RAM_BASE
   RAM Size     : $RAM_SIZE ($(printf "%d" $((RAM_SIZE_ALIGNED))) bytes)
@@ -326,7 +374,6 @@ cat <<BANNER
   Exec Backend : $EXEC_BACKEND
   Trace Mode   : $TRACE_MODE
   Crash Logs   : $CRASH_DIR
-  Trace Dir    : $TRACES_DIR
   tohost Addr  : ${TOHOST_ADDR:-<unset>}
   Max Program  : ${MAX_PROGRAM_WORDS} words
   PC Stall Lim : ${PC_STAGNATION_LIMIT} commits
@@ -336,7 +383,8 @@ cat <<BANNER
   OBJCOPY_BIN  : ${OBJCOPY_BIN:-<default>}
   OBJDUMP_BIN  : ${OBJDUMP_BIN:-<default>}
   LD_BIN       : ${LD_BIN:-<default>}
-  AFL_DEBUG_FLAG : $AFL_DEBUG_FLAG
+  AFL++ Debug  : ${AFL_DEBUG:-0}
+  Backup Made  : $([ "$BACKUP_WORKDIR" -eq 1 ] && echo "Yes" || echo "No")
 ==========================================================
 BANNER
 

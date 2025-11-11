@@ -67,21 +67,21 @@ public:
       tick(top_);
     }
 
-    bool got_finish() const override { return Verilated::gotFinish(); }
-    bool trap() const override { return top_->rvfi_trap; }
-    bool rvfi_valid() const override { return top_->rvfi_valid; }
-    uint32_t rvfi_insn() const override { return top_->rvfi_insn; }
-    uint32_t rvfi_pc_rdata() const override { return top_->rvfi_pc_rdata; }
-    uint32_t rvfi_pc_wdata() const override { return top_->rvfi_pc_wdata; }
-    uint32_t rvfi_rd_addr() const override { return top_->rvfi_rd_addr; }
-    uint32_t rvfi_rd_wdata() const override { return top_->rvfi_rd_wdata; }
-    uint32_t rvfi_mem_addr() const override { return top_->rvfi_mem_addr; }
-    uint32_t rvfi_mem_rmask() const override { return top_->rvfi_mem_rmask; }
-    uint32_t rvfi_mem_wmask() const override { return top_->rvfi_mem_wmask; }
-    uint64_t rvfi_csr_mcycle_wmask() const override { return top_->rvfi_csr_mcycle_wmask; }
-    uint64_t rvfi_csr_mcycle_wdata() const override { return top_->rvfi_csr_mcycle_wdata; }
-    uint64_t rvfi_csr_minstret_wmask() const override { return top_->rvfi_csr_minstret_wmask; }
-    uint64_t rvfi_csr_minstret_wdata() const override { return top_->rvfi_csr_minstret_wdata; }
+    bool      got_finish()              const override { return Verilated::gotFinish();         }
+    bool      trap()                    const override { return top_->rvfi_trap;                }
+    bool      rvfi_valid()              const override { return top_->rvfi_valid;               }
+    uint32_t  rvfi_insn()               const override { return top_->rvfi_insn;                }
+    uint32_t  rvfi_pc_rdata()           const override { return top_->rvfi_pc_rdata;            }
+    uint32_t  rvfi_pc_wdata()           const override { return top_->rvfi_pc_wdata;            }
+    uint32_t  rvfi_rd_addr()            const override { return top_->rvfi_rd_addr;             }
+    uint32_t  rvfi_rd_wdata()           const override { return top_->rvfi_rd_wdata;            }
+    uint32_t  rvfi_mem_addr()           const override { return top_->rvfi_mem_addr;            }
+    uint32_t  rvfi_mem_rmask()          const override { return top_->rvfi_mem_rmask;           }
+    uint32_t  rvfi_mem_wmask()          const override { return top_->rvfi_mem_wmask;           }
+    uint64_t  rvfi_csr_mcycle_wmask()   const override { return top_->rvfi_csr_mcycle_wmask;    }
+    uint64_t  rvfi_csr_mcycle_wdata()   const override { return top_->rvfi_csr_mcycle_wdata;    }
+    uint64_t  rvfi_csr_minstret_wmask() const override { return top_->rvfi_csr_minstret_wmask;  }
+    uint64_t  rvfi_csr_minstret_wdata() const override { return top_->rvfi_csr_minstret_wdata;  }
 
   private:
     Vpicorv32* top_ = nullptr;

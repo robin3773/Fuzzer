@@ -1,11 +1,29 @@
 #pragma once
 
+// ============================================================================
+// DEPRECATED: This logging system has been replaced by Debug.hpp
+// ============================================================================
+// The hwfuzz::harness_log() system that wrote to HARNESS_STDIO_LOG has been
+// deprecated in favor of the unified hwfuzz::debug:: logging system which
+// writes to a single runtime.log file.
+//
+// Migration guide:
+//   std::fprintf(hwfuzz::harness_log(), "[INFO] ...") → hwfuzz::debug::logInfo(...)
+//   std::fprintf(hwfuzz::harness_log(), "[WARN] ...") → hwfuzz::debug::logWarn(...)
+//   std::fprintf(hwfuzz::harness_log(), "[ERROR] ...") → hwfuzz::debug::logError(...)
+//
+// This file is kept for backward compatibility but should not be used in new code.
+// All logs now go to: ${PROJECT_ROOT}/workdir/logs/runtime.log
+// ============================================================================
+
 #include <cstdio>
 #include <cstdlib>
 #include "QuietLog.hpp"
+#include "Debug.hpp"
 
 namespace hwfuzz {
 
+// DEPRECATED: Use hwfuzz::debug::logInfo/logError/logWarn instead
 inline FILE*& harness_log_storage() {
   static FILE* fp = nullptr;
   return fp;

@@ -18,9 +18,16 @@ HARNESS_SRC_DIR  := $(HARNESS_DIR)/src
 HARNESS_INC_DIR  := $(HARNESS_DIR)/include
 HARNESS_SRCS := \
   	$(HARNESS_SRC_DIR)/HarnessMain.cpp \
+	$(HARNESS_SRC_DIR)/HarnessConfig.cpp \
 	$(HARNESS_SRC_DIR)/CpuPicorv32.cpp \
 	$(HARNESS_SRC_DIR)/SpikeProcess.cpp \
-	$(HARNESS_SRC_DIR)/DutExit.cpp
+	$(HARNESS_SRC_DIR)/SpikeHelpers.cpp \
+	$(HARNESS_SRC_DIR)/DutExit.cpp \
+	$(HARNESS_SRC_DIR)/SpikeExit.cpp \
+	$(HARNESS_SRC_DIR)/CrashDetection.cpp \
+	$(HARNESS_SRC_DIR)/GoldenModel.cpp \
+	$(HARNESS_SRC_DIR)/DifferentialChecker.cpp \
+	$(TOP_DIR)/include/hwfuzz/Debug.cpp
 # (headers are automatically included)
 # ------------------------------------------------------------
 

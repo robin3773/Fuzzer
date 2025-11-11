@@ -1,17 +1,26 @@
 # Legacy filename retained for compatibility. Prefer mutator.default.yaml.
-strategy: IR
-verbose: false
-enable_c: true
-
-probabilities:
-  decode: 60
-  imm_random: 25
-
-weights:
-  r_base_alu: 70
-  r_m: 30
+# Strategy options: INSTRUCTION_LEVEL (recommended), BYTE_LEVEL, MIXED_MODE, ADAPTIVE
+strategy: INSTRUCTION_LEVEL
 
 schemas:
   isa: rv32imc
   root: ./schemas
   map: isa_map.yaml
+
+# ============================================================================
+# RESERVED FIELDS (for future enhancements - see FUTUREWORK.md)
+# ============================================================================
+# verbose: false                    # Reserved: Verbose logging
+# enable_c: true                    # Reserved: RVC compressed instructions (auto-detected from schema)
+#
+# probabilities:                    # Reserved: Mutation probability tuning
+#   decode: 60                      # Reserved: Schema vs byte-level mutations
+#   imm_random: 25                  # Reserved: Random vs delta immediate generation
+#
+# weights:                          # Reserved: Weighted instruction selection
+#   r_base_alu: 70                  # Reserved: Base ALU instructions
+#   r_m: 30                         # Reserved: M-extension instructions
+#
+# See ../FUTUREWORK.md for detailed plans and implementation notes
+# ============================================================================
+

@@ -110,6 +110,7 @@ fuzz-status:
 
 
 clean: sim-clean firmware-clean mutator-clean fuzz-clean
+	@rm -rfv workdir/*
 	@echo "$(BLUE)[CLEAN] All cleanups done!$(RESET)"
 
 
