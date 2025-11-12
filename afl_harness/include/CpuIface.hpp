@@ -50,6 +50,12 @@ class CpuIface {
 public:
   /**
    * @brief Virtual destructor for proper cleanup of derived classes
+   * 
+   * Example:
+   * @code
+   *   std::unique_ptr<CpuIface> cpu = std::make_unique<CpuPicorv32>();
+   *   // Automatic cleanup when unique_ptr goes out of scope.
+   * @endcode
    */
   virtual ~CpuIface() = default;
   
@@ -62,6 +68,12 @@ public:
    * 
    * @note Implementation-specific reset behavior (reset vector address,
    *       initial register values) should match the target hardware
+   * 
+   * Example:
+   * @code
+   *   cpu->reset();
+   *   cpu->load_input(input);
+   * @endcode
    */
   virtual void reset() = 0;
   
@@ -97,6 +109,7 @@ public:
    * @note Call rvfi_valid() after stepping to check if new commit data is available
    * @see rvfi_valid()
    */
+
   virtual void step() = 0;
   
   /**
@@ -110,6 +123,13 @@ public:
    * 
    * @note Finish condition depends on exit stub implementation
    * @see DutExit.hpp for exit stub details
+   * 
+   * Example:
+   * @code
+   *   if (cpu->got_finish()) {
+   *     hwfuzz::debug::logInfo("Program completed cleanly");
+   *   }
+   * @endcode
    */
   virtual bool got_finish() const = 0;
   
@@ -123,6 +143,13 @@ public:
    * @return true if CPU trapped/faulted, false if executing normally
    * 
    * @note Traps typically indicate interesting fuzzer findings
+   * 
+   * Example:
+   * @code
+   *   if (cpu->trap()) {
+   *     logger.writeCrash("trap", cpu->rvfi_pc_rdata(), cpu->rvfi_insn(), cycle, input);
+   *   }
+   * @endcode
    */
   virtual bool trap() const = 0;
 
@@ -178,6 +205,12 @@ public:
    * was fetched (the "read" PC value before execution).
    * 
    * @return PC address before instruction execution
+   * 
+   * Example:
+   * @code
+   *   uint32_t pc = cpu->rvfi_pc_rdata();
+   *   dut_state.last_pc = pc;
+   * @endcode
    */
   virtual uint32_t rvfi_pc_rdata() const = 0;
   
@@ -211,6 +244,12 @@ public:
    * @return Destination register number (0-31), or 0 if no writeback
    * 
    * @note x0 is hardwired to zero in RISC-V; writes to x0 have no effect
+   * 
+   * Example:
+   * @code
+   *   uint32_t rd = cpu->rvfi_rd_addr();
+   *   if (rd != 0) shadow_regs[rd] = cpu->rvfi_rd_wdata();
+   * @endcode
    */
   virtual uint32_t rvfi_rd_addr() const = 0;
   
@@ -242,6 +281,13 @@ public:
    * @return Memory address accessed, or 0 if no memory operation
    * 
    * @see rvfi_mem_rmask(), rvfi_mem_wmask()
+   * 
+   * Example:
+   * @code
+   *   if (cpu->rvfi_mem_wmask()) {
+   *     crash_mem_addr = cpu->rvfi_mem_addr();
+   *   }
+   * @endcode
    */
   virtual uint32_t rvfi_mem_addr() const = 0;
   
@@ -278,6 +324,13 @@ public:
    * @return Byte-level write mask (0 if no write occurred)
    * 
    * @see rvfi_mem_rmask() for mask interpretation
+   * 
+   * Example:
+   * @code
+   *   if (cpu->rvfi_mem_wmask() == 0xF) {
+   *     // Full word store
+   *   }
+   * @endcode
    */
   virtual uint32_t rvfi_mem_wmask() const = 0;
   
@@ -295,6 +348,13 @@ public:
    * Non-zero indicates mcycle was written; zero indicates no update.
    * 
    * @return Write mask for mcycle CSR (default: 0 = not tracked)
+   * 
+   * Example:
+   * @code
+   *   if (cpu->rvfi_csr_mcycle_wmask()) {
+   *     last_mcycle = cpu->rvfi_csr_mcycle_wdata();
+   *   }
+   * @endcode
    */
   virtual uint64_t rvfi_csr_mcycle_wmask() const { return 0; }
   
@@ -305,6 +365,11 @@ public:
    * was written this cycle. Only meaningful if wmask is non-zero.
    * 
    * @return New mcycle counter value (default: 0 = not tracked)
+   * 
+   * Example:
+   * @code
+   *   uint64_t mcycle = cpu->rvfi_csr_mcycle_wdata();
+   * @endcode
    */
   virtual uint64_t rvfi_csr_mcycle_wdata() const { return 0; }
   
@@ -315,6 +380,13 @@ public:
    * Non-zero indicates minstret was written; zero indicates no update.
    * 
    * @return Write mask for minstret CSR (default: 0 = not tracked)
+   * 
+   * Example:
+   * @code
+   *   if (cpu->rvfi_csr_minstret_wmask()) {
+   *     shadow_minstret = cpu->rvfi_csr_minstret_wdata();
+   *   }
+   * @endcode
    */
   virtual uint64_t rvfi_csr_minstret_wmask() const { return 0; }
   
@@ -325,6 +397,11 @@ public:
    * performance counter if it was written this cycle.
    * 
    * @return New minstret counter value (default: 0 = not tracked)
+   * 
+   * Example:
+   * @code
+   *   uint64_t retired = cpu->rvfi_csr_minstret_wdata();
+   * @endcode
    */
   virtual uint64_t rvfi_csr_minstret_wdata() const { return 0; }
 };

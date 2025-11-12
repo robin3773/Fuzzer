@@ -224,6 +224,11 @@ private:
    * 
    * @param v Value to convert
    * @return Hex string (e.g., "8000004" for 0x80000004)
+   * 
+   * Example:
+   * @code
+   *   std::string pc_hex = hex32(0x80000004);  // "80000004"
+   * @endcode
    */
   static std::string hex32(uint32_t v) {
     char buf[16];
@@ -240,6 +245,12 @@ private:
    * @param reason Crash type/reason
    * @param cycle Execution cycle number
    * @return Full path without extension (e.g., "/path/crash_trap_20250111T143052_cyc1234")
+   * 
+   * Example:
+   * @code
+   *   std::string base = makeBaseName("trap", 1024);
+   *   // => "/workdir/logs/crash/crash_trap_20250111T143052_cyc1024"
+   * @endcode
    */
   std::string makeBaseName(const std::string &reason, unsigned cycle) const {
     std::string ts = utils::timestamp_now();
@@ -257,6 +268,12 @@ private:
    * @param data Binary data to write
    * 
    * @note Logs errors to stderr but does not throw
+   * 
+   * Example:
+   * @code
+   *   std::vector<unsigned char> bytes = {0x13, 0x00, 0x00, 0x00};
+   *   writeFile("/tmp/test.bin", bytes);
+   * @endcode
    */
   static void writeFile(const std::string &path, const std::vector<unsigned char> &data) {
     std::string tmp = path + ".tmp";
@@ -284,6 +301,11 @@ private:
    * @param text Text content to write
    * 
    * @note Logs errors to stderr but does not throw
+   * 
+   * Example:
+   * @code
+   *   writeTextAtomically("/tmp/report.log", "Reason: trap\\n");
+   * @endcode
    */
   static void writeTextAtomically(const std::string &path, const std::string &text) {
     std::string tmp = path + ".tmp";

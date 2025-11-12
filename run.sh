@@ -37,10 +37,11 @@ BACKUP_WORKDIR=0
 # ---------- Configurable params ----------
 CORES="${CORES:-1}"
 MEM_LIMIT="${MEM_LIMIT:-4G}"        # e.g., 4G or 'none'
-TIMEOUT="${TIMEOUT:-100000}"       # ms or 'none'
+TIMEOUT="${TIMEOUT:-100000}"       # ms or 'none' (100 seconds default - needed for Verilator init + Spike execution)
 DEBUG="${DEBUG:-0}"                # ISA mutator & harness debug logging
 MAX_CYCLES="${MAX_CYCLES:-50000}"
 UI_MODE="${UI_MODE:-auto}"         # auto | on | off (AFL++ status screen)
+ENABLE_COVERAGE="${ENABLE_COVERAGE:-0}"  # Verilator coverage (temporarily disabled - API update needed)
 
 NO_BUILD=0
 AFL_EXTRA_ARGS=""
@@ -54,7 +55,7 @@ Usage: $0 [options]
 Options:
   -c, --cores N               Number of AFL workers (default: ${CORES})
   -m, --mem LIMIT             AFL memory limit, e.g. 4G or 'none' (default: ${MEM_LIMIT})
-  -t, --timeout MS            AFL timeout in ms or 'none' (default: ${TIMEOUT})
+  -t, --timeout MS            AFL timeout in ms or 'none' (default: ${TIMEOUT}, auto 180s for golden mode)
       --seeds DIR             Input seeds dir (default: ${SEEDS_DIR})
   -o, --out DIR               AFL corpora/output dir (if omitted, uses workdir/corpora)
       --mutator PATH          Custom mutator .so (default: ${MUTATOR_SO})
@@ -67,6 +68,7 @@ Options:
       --afl-debug             Enable AFL++ debug output (AFL_DEBUG=1) - very verbose
       --ui-mode MODE          AFL++ UI mode: auto (default) | on | off
       --max-cycles N          Pass MAX_CYCLES to harness
+      --coverage on|off       Enable/disable Verilator coverage (default: on)
       --golden MODE           GOLDEN_MODE = live | off | batch | replay (default: live)
       --spike PATH            Path to Spike binary (SPIKE_BIN)
       --objcopy PATH          Path to objcopy (OBJCOPY_BIN)
@@ -108,12 +110,14 @@ while [[ $# -gt 0 ]]; do
     --afl-debug)       AFL_DEBUG=1; shift ;;
     --ui-mode)         UI_MODE="$2"; shift 2 ;;
     --max-cycles)      MAX_CYCLES="$2"; shift 2 ;;
-    --golden)          GOLDEN_MODE="$2"; shift 2 ;;
-    --spike)           SPIKE_BIN="$(realpath -m "$2")"; shift 2 ;;
-    --objcopy)         OBJCOPY_BIN="$(realpath -m "$2")"; shift 2 ;;
-    --isa)             SPIKE_ISA="$2"; shift 2 ;;
-    --trace-mode)      TRACE_MODE="$2"; shift 2 ;;
-    --exec-backend)    EXEC_BACKEND="$2"; shift 2 ;;
+    --coverage)        
+      case "$2" in
+        on|1)  ENABLE_COVERAGE=1 ;;
+        off|0) ENABLE_COVERAGE=0 ;;
+        *) log "[!] Invalid --coverage value: $2 (use 'on' or 'off')"; exit 1 ;;
+      esac
+      shift 2 ;;
+  # Removed: GOLDEN_MODE, SPIKE_BIN, SPIKE_ISA, TRACE_MODE, EXEC_BACKEND are now only set in harness.conf
     -h|--help)         usage; exit 0 ;;
     *) log "[!] Unknown option: $1"; usage; exit 1 ;;
   esac
@@ -142,15 +146,19 @@ fi
 eval "$(grep -E '^[A-Z_]+\s*:=\s*0x[0-9A-Fa-f]+' "$MEMORY_CONFIG" | sed 's/\s*:=\s*/=/' | sed 's/^/export /')"
 
 # Validate that critical values were loaded
-if [[ -z "${PROGADDR_RESET:-}" || -z "${RAM_BASE:-}" || -z "${STACK_ADDR:-}" ]]; then
+if [[ -z "${PROGADDR_RESET:-}" || -z "${RAM_BASE:-}" || -z "${STACK_ADDR:-}" || -z "${TOHOST_ADDR:-}" ]]; then
   log "[!] Failed to load memory configuration from $MEMORY_CONFIG" >&2
+  log "[!] PROGADDR_RESET=${PROGADDR_RESET:-<unset>}" >&2
+  log "[!] RAM_BASE=${RAM_BASE:-<unset>}" >&2
+  log "[!] STACK_ADDR=${STACK_ADDR:-<unset>}" >&2
+  log "[!] TOHOST_ADDR=${TOHOST_ADDR:-<unset>}" >&2
   exit 1
 fi
 
 # Set aliases for compatibility
 export STACKADDR="$STACK_ADDR"
 export RAM_SIZE="$RAM_SIZE_ALIGNED"  # Alias for compatibility
-export TOHOST_ADDR
+# TOHOST_ADDR is already exported by eval above
 
 # Calculate RAM_SIZE_BYTES decimal value for display
 RAM_SIZE_BYTES_DEC=$((RAM_SIZE_BYTES))
@@ -212,6 +220,15 @@ export AFL_CUSTOM_MUTATOR_LIBRARY="$MUTATOR_SO"
 export DEBUG="${DEBUG:-0}"
 export MAX_CYCLES="${MAX_CYCLES:-50000}"
 
+# AFL fork server initialization timeout (ms)
+# Increase this if harness needs time to initialize Verilator/Spike before __AFL_LOOP
+export AFL_FORKSRV_INIT_TMOUT=10000  # 10 seconds for Verilator init
+
+# Tell AFL++ to preserve these environment variables across the fork server
+# This is CRITICAL - without this, the harness won't see PROJECT_ROOT, TOHOST_ADDR, etc.
+# Format: space-separated list of variable names (AFL_KEEP_ENV expects SPACE-separated, not colons)
+export AFL_KEEP_ENV="PROJECT_ROOT TOHOST_ADDR PROGADDR_RESET RAM_BASE STACK_ADDR STACKADDR RAM_SIZE DEBUG MAX_CYCLES MUTATOR_CONFIG SCHEMA_DIR CRASH_LOG_DIR SPIKE_LOG_FILE GOLDEN_MODE TRACE_MODE EXEC_BACKEND SPIKE_BIN SPIKE_ISA OBJCOPY_BIN OBJDUMP_BIN LD_BIN PC_STAGNATION_LIMIT MAX_PROGRAM_WORDS STOP_ON_SPIKE_DONE APPEND_EXIT_STUB"
+
 # Always set mutator config (default or user-specified)
 export MUTATOR_CONFIG="${MUTATOR_CONFIG:-$PROJECT_ROOT/afl/isa_mutator/config/mutator.default.yaml}"
 
@@ -221,7 +238,6 @@ export SCHEMA_DIR="${SCHEMA_DIR:-$PROJECT_ROOT/schemas}"
 # Propagate crash directory to harness using the name it expects
 export CRASH_LOG_DIR="$CRASH_DIR"
 export SPIKE_LOG_FILE
-export LINKER_SCRIPT="${LINKER_SCRIPT:-$PROJECT_ROOT/tools/link.ld}"
 
 # Golden/trace/backend defaults (from fuzzer.env or CLI overrides)
 export GOLDEN_MODE="${GOLDEN_MODE:-live}"
@@ -233,7 +249,6 @@ export SPIKE_BIN="${SPIKE_BIN:-/opt/riscv/bin/spike}"
 export SPIKE_ISA="${SPIKE_ISA:-rv32im}"
 export OBJCOPY_BIN="${OBJCOPY_BIN:-/opt/riscv/bin/riscv32-unknown-elf-objcopy}"
 export OBJDUMP_BIN="${OBJDUMP_BIN:-/opt/riscv/bin/riscv32-unknown-elf-objdump}"
-export LD_BIN="${LD_BIN:-/opt/riscv/bin/riscv32-unknown-elf-ld}"
 export PC_STAGNATION_LIMIT="${PC_STAGNATION_LIMIT:-512}"
 export MAX_PROGRAM_WORDS="${MAX_PROGRAM_WORDS:-256}"
 export STOP_ON_SPIKE_DONE="${STOP_ON_SPIKE_DONE:-1}"
@@ -247,6 +262,26 @@ if [[ "$GOLDEN_MODE" != "off" ]]; then
     log "    Golden mode is enabled but Spike is not available." >&2
     log "    Install Spike or set GOLDEN_MODE=off to continue." >&2
     exit 1
+  fi
+  
+  # Auto-adjust timeout for golden mode if using default timeout
+  # Golden mode requires much longer timeouts due to Spike overhead:
+  # - objcopy + ld invocation (~50-200ms per test case)
+  # - Spike process spawn (~100-500ms per test case)
+  # - Spike execution (2-10x slower than Verilator)
+  # - Differential comparison overhead
+  # Recommended: 120-180 seconds for golden mode with live differential testing
+  if [[ "$TIMEOUT" == "100000" ]]; then
+    log "[INFO] Golden mode enabled: auto-increasing timeout from 100s to 180s"
+    log "[INFO] Override with --timeout if needed (e.g., --timeout 200000)"
+    TIMEOUT="180000"
+  fi
+  
+  # Also increase fork server initialization timeout for golden mode
+  # Spike initialization adds significant overhead to the first execution
+  if [[ "${AFL_FORKSRV_INIT_TMOUT:-10000}" == "10000" ]]; then
+    log "[INFO] Golden mode: increasing fork server init timeout to 30s"
+    export AFL_FORKSRV_INIT_TMOUT=30000
   fi
   
   # OBJCOPY_BIN is required for converting .bin to .elf
@@ -295,11 +330,11 @@ if [[ -n "${SPIKE_BIN:-}" ]];   then export SPIKE_BIN; fi
 if [[ -n "${SPIKE_ISA:-}" ]];   then export SPIKE_ISA; fi
 if [[ -n "${OBJCOPY_BIN:-}" ]]; then export OBJCOPY_BIN; fi
 if [[ -n "${OBJDUMP_BIN:-}" ]]; then export OBJDUMP_BIN; fi
-if [[ -n "${LD_BIN:-}" ]];      then export LD_BIN; fi
+if [[ -n "${LD_BIN:-}" ]];      then :; fi
 export PC_STAGNATION_LIMIT MAX_PROGRAM_WORDS STOP_ON_SPIKE_DONE APPEND_EXIT_STUB
 
 # Preserve these env vars in the target (space-separated list for AFL++)
-export AFL_KEEP_ENV="CRASH_LOG_DIR MAX_CYCLES DEBUG GOLDEN_MODE EXEC_BACKEND TRACE_MODE SPIKE_BIN SPIKE_ISA OBJCOPY_BIN OBJDUMP_BIN LD_BIN SPIKE_LOG_FILE LINKER_SCRIPT TOHOST_ADDR PC_STAGNATION_LIMIT MAX_PROGRAM_WORDS STOP_ON_SPIKE_DONE APPEND_EXIT_STUB RAM_BASE RAM_SIZE PROGADDR_RESET PROGADDR_IRQ STACK_ADDR STACKADDR MUTATOR_CONFIG SCHEMA_DIR"
+export AFL_KEEP_ENV="CRASH_LOG_DIR MAX_CYCLES DEBUG GOLDEN_MODE EXEC_BACKEND TRACE_MODE SPIKE_BIN SPIKE_ISA OBJCOPY_BIN OBJDUMP_BIN SPIKE_LOG_FILE TOHOST_ADDR PC_STAGNATION_LIMIT MAX_PROGRAM_WORDS STOP_ON_SPIKE_DONE APPEND_EXIT_STUB RAM_BASE RAM_SIZE PROGADDR_RESET PROGADDR_IRQ STACK_ADDR STACKADDR MUTATOR_CONFIG SCHEMA_DIR"
 
 # Optional AFL debug output (very verbose - separate from mutator/harness DEBUG)
 if [[ "$AFL_DEBUG" == "1" ]]; then
@@ -364,6 +399,7 @@ cat <<BANNER
   Spike Log    : $SPIKE_LOG_FILE
   Runtime Log  : ${LOGS_DIR}/runtime.log
   Max Cycles   : $MAX_CYCLES
+  Coverage     : $([ "$ENABLE_COVERAGE" -eq 1 ] && echo "ENABLED (Verilator structural)" || echo "DISABLED")
   RAM Base     : $RAM_BASE
   RAM Size     : $RAM_SIZE ($(printf "%d" $((RAM_SIZE_ALIGNED))) bytes)
   Reset PC     : $PROGADDR_RESET
@@ -425,7 +461,8 @@ fi
 # ---------- Build (unless --no-build) ----------
 if [[ "$NO_BUILD" -eq 0 ]]; then
   log "[BUILD] Building mutator + harness..."
-  make -C "$AFL_DIR" build
+  log "[BUILD] Verilator coverage: $([ "$ENABLE_COVERAGE" -eq 1 ] && echo "ENABLED" || echo "DISABLED")"
+  make -C "$AFL_DIR" build ENABLE_COVERAGE="$ENABLE_COVERAGE"
 fi
 
 # ---------- Launch AFL++ ----------

@@ -84,7 +84,7 @@ std::string format_arg(const std::string& arg) {
   return quoted;
 }
 
-std::string build_spike_elf(const std::vector<unsigned char>& input) {
+std::string build_spike_elf(const std::vector<unsigned char>& input, const std::string& ld_bin, const std::string& linker_script) {
   // Create temporary binary file
   char tmpbin[] = "/tmp/dut_in_XXXXXX.bin";
   int bfd = ::mkstemps(tmpbin, 4);
@@ -105,11 +105,8 @@ std::string build_spike_elf(const std::vector<unsigned char>& input) {
     ::unlink(tmpbin_path.c_str());
   };
   
-  // Get objcopy binary (default to 32-bit RISC-V)
-  std::string objcopy = "riscv32-unknown-elf-objcopy";
-  if (const char* oc = std::getenv("OBJCOPY_BIN")) {
-    if (*oc) objcopy = std::string(oc);
-  }
+  // Get objcopy binary (default to 32-bit RISC-V with full path)
+  std::string objcopy = "/opt/riscv/bin/riscv32-unknown-elf-objcopy";
   
   // Convert binary to object file
   std::vector<std::string> objcopy_args{
@@ -141,16 +138,6 @@ std::string build_spike_elf(const std::vector<unsigned char>& input) {
   }
   
   // Link object file to create ELF
-  std::string ld_bin = "riscv32-unknown-elf-ld";
-  if (const char* ld_env = std::getenv("LD_BIN")) {
-    if (*ld_env) ld_bin = std::string(ld_env);
-  }
-  
-  std::string linker_script;
-  if (const char* ls_env = std::getenv("LINKER_SCRIPT")) {
-    if (*ls_env) linker_script = std::string(ls_env);
-  }
-  
   if (linker_script.empty()) {
     hwfuzz::debug::logError("[SPIKE] LINKER_SCRIPT not set; cannot build ELF.\n");
     cleanup_tmp();

@@ -243,6 +243,12 @@ public:
 	 * @brief Default constructor (no file opened)
 	 * 
 	 * Creates an inactive TraceWriter. Call open() to start writing.
+	 * 
+	 * Example:
+	 * @code
+	 *   TraceWriter trace;
+	 *   trace.open("workdir/traces");
+	 * @endcode
 	 */
 	TraceWriter() = default;
 	
@@ -263,6 +269,14 @@ public:
 	
 	/**
 	 * @brief Destructor closes file descriptor if open
+	 * 
+	 * Example:
+	 * @code
+	 *   {
+	 *     TraceWriter trace("workdir/traces");
+	 *     trace.write(rec);
+	 *   } // File descriptor closed automatically.
+	 * @endcode
 	 */
 	~TraceWriter() { if (fd_ >= 0) ::close(fd_); }
 

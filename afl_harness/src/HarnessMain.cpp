@@ -8,6 +8,8 @@
 #include "DifferentialChecker.hpp"
 #include "DutExit.hpp"
 #include "SpikeHelpers.hpp"
+#include "Feedback.hpp"
+#include "VerilatorCoverage.hpp"
 
 #include "verilated.h"
 #include <hwfuzz/Debug.hpp>
@@ -80,17 +82,9 @@ static std::vector<unsigned char> load_input(int argc, char** argv) {
 
 static TraceWriter setup_trace(const HarnessConfig& cfg) {
   TraceWriter tracer;
-  const char* trace_mode_env = std::getenv("TRACE_MODE");
-  
-  bool trace_enabled = true;
-  if (trace_mode_env && (std::string(trace_mode_env) == "off" || std::string(trace_mode_env) == "0")) {
-    trace_enabled = false;
-  }
-  
-  if (trace_enabled) {
+  if (cfg.trace_enabled) {
     tracer.open(cfg.trace_dir);
   }
-  
   return tracer;
 }
 
@@ -153,6 +147,7 @@ static void run_execution_loop(CpuIface* cpu, const HarnessConfig& cfg,
                                const std::vector<unsigned char>& input,
                                CrashLogger& logger, TraceWriter& tracer,
                                GoldenModel& golden, DifferentialChecker& diff_checker,
+                               Feedback& feedback, fuzz::VerilatorCoverage& coverage,
                                ExecutionState& state) {
   for (; state.cyc < cfg.max_cycles && !cpu->got_finish(); ++state.cyc) {
     handle_signal_crash(logger, cpu, state.cyc, input);
@@ -180,10 +175,22 @@ static void run_execution_loop(CpuIface* cpu, const HarnessConfig& cfg,
       
       tracer.write(rec);
 
-      // Check PC stagnation
+      // Report coverage feedback to AFL++
+      feedback.report_instruction(rec.pc_r, rec.insn);
+      if (rec.mem_rmask || rec.mem_wmask) {
+        feedback.report_memory_access(rec.mem_addr, rec.mem_wmask != 0);
+      }
+      if (rec.rd_addr != 0) {
+        feedback.report_register_write(rec.rd_addr, rec.rd_wdata);
+      }
+
+      // Check PC stagnation (hang detection)
       if (crash_detection::check_pc_stagnation(cpu, logger, state.cyc, input,
                                                cfg.pc_stagnation_limit, state.last_progress_pc,
                                                state.last_progress_valid, state.stagnation_count)) {
+        // PC stagnation is a hang - abort so AFL++ can detect it
+        golden.stop();
+        hwfuzz::debug::logWarn("[HANG] PC stagnation detected - aborting\n");
         std::abort();
       }
 
@@ -241,46 +248,88 @@ int main(int argc, char** argv) {
   Verilated::randSeed(0);
 #endif
 
-  // Load input
-  std::vector<unsigned char> input = load_input(argc, argv);
-
-  // Initialize DUT
-  CpuIface* cpu = make_cpu();
-  cpu->reset();
-  cpu->load_input(input);
-
-  // Setup logging and tracing
+  // One-time initialization (outside AFL++ loop)
   CrashLogger logger(cfg);
   TraceWriter tracer = setup_trace(cfg);
+  
+  // Setup feedback for AFL++ (shared across iterations)
+  Feedback feedback;
+  feedback.initialize();
+  
+  // Setup Verilator coverage tracking (shared across iterations)
+  fuzz::VerilatorCoverage coverage;
+  std::string coverage_file = cfg.trace_dir + "/coverage.dat";
+  coverage.initialize(coverage_file);
 
-  // Setup golden model (Spike)
-  GoldenModel golden;
-  golden.initialize(input, cfg.trace_dir.c_str());
+  // AFL++ persistent mode - fork server starts here
+  // This dramatically improves fuzzing speed by avoiding process startup overhead
+  __AFL_INIT();
+  
+  hwfuzz::debug::logInfo("[HARNESS] Starting AFL++ persistent mode loop\n");
+  
+  // Per-iteration fuzzing loop (AFL++ will restart from here)
+  while (__AFL_LOOP(10000)) {
+    hwfuzz::debug::logInfo("[HARNESS] Loop iteration started\n");
+    
+    // Load input for this iteration (must reopen file each time for AFL++ @@)
+    std::vector<unsigned char> input = load_input(argc, argv);
+    
+    hwfuzz::debug::logInfo("[HARNESS] Loaded %zu bytes of input\n", input.size());
+    
+    // Skip empty inputs
+    if (input.empty()) {
+      hwfuzz::debug::logWarn("[HARNESS] Empty input, skipping iteration\n");
+      continue;
+    }
 
-  // Setup differential checker
-  DifferentialChecker diff_checker;
+    // Initialize DUT (fresh instance per iteration)
+    CpuIface* cpu = make_cpu();
+    cpu->reset();
+    cpu->load_input(input);
 
-  // Run execution
-  ExecutionState state = {};
-  state.exit_reason = ExitReason::None;
-  state.graceful_exit = false;
-  state.stagnation_count = 0;
-  state.last_progress_valid = false;
+    // Setup golden model (Spike) for this iteration
+    GoldenModel golden;
+    golden.initialize(input, cfg);
 
-  run_execution_loop(cpu, cfg, input, logger, tracer, golden, diff_checker, state);
+    // Setup differential checker for this iteration
+    DifferentialChecker diff_checker;
 
-  // Handle termination
-  if (state.graceful_exit) {
+    // Run execution
+    ExecutionState state = {};
+    state.exit_reason = ExitReason::None;
+    state.graceful_exit = false;
+    state.stagnation_count = 0;
+    state.last_progress_valid = false;
+
+    run_execution_loop(cpu, cfg, input, logger, tracer, golden, diff_checker, feedback, coverage, state);
+
+    // Write coverage data
+    coverage.write_and_reset();
+
+    // Cleanup golden model
     golden.stop();
-    hwfuzz::debug::logInfo("[HARNESS] Graceful termination after %u cycles (reason=%s).\n",
-                           state.cyc, exit_reason_text(state.exit_reason));
-    _exit(0);
+
+    // Handle termination
+    if (state.graceful_exit) {
+      hwfuzz::debug::logInfo("[HARNESS] Graceful termination after %u cycles (reason=%s).\n",
+                             state.cyc, exit_reason_text(state.exit_reason));
+      delete cpu;
+      // Continue to next iteration in persistent mode
+      continue;
+    }
+
+    // Check for timeout (hang detection)
+    if (crash_detection::check_timeout(state.cyc, cfg.max_cycles, cpu, logger, input)) {
+      // Timeout is a hang - abort so AFL++ can detect it
+      hwfuzz::debug::logWarn("[HANG] Timeout detected - aborting\n");
+      delete cpu;
+      std::abort();
+    }
+
+    // Cleanup for next iteration
+    delete cpu;
   }
 
-  // Check for timeout
-  if (crash_detection::check_timeout(state.cyc, cfg.max_cycles, cpu, logger, input)) {
-    std::abort();
-  }
-
+  // Exit after AFL++ persistent loop completes
   _exit(0);
 }

@@ -27,6 +27,8 @@ HARNESS_SRCS := \
 	$(HARNESS_SRC_DIR)/CrashDetection.cpp \
 	$(HARNESS_SRC_DIR)/GoldenModel.cpp \
 	$(HARNESS_SRC_DIR)/DifferentialChecker.cpp \
+	$(HARNESS_SRC_DIR)/Feedback.cpp \
+	$(HARNESS_SRC_DIR)/VerilatorCoverage.cpp \
 	$(TOP_DIR)/include/hwfuzz/Debug.cpp
 # (headers are automatically included)
 # ------------------------------------------------------------
@@ -45,7 +47,17 @@ FUZZ_EXE    := $(AFL_DIR)/afl_$(MODULE)
 
 # Toolchain
 CXXFLAGS    ?= -std=c++17 -O2 -g -fno-omit-frame-pointer
-LDFLAGS     ?= -lpthread -latomic -ldl -lboost_system
+LDFLAGS     ?= -lpthread -latomic -ldl -lboost_system -Wl,--allow-multiple-definition
+
+# Coverage options (set ENABLE_COVERAGE=0 to disable Verilator coverage)
+# Temporarily disabled due to API incompatibility - will be fixed in a future update
+ENABLE_COVERAGE ?= 0
+ifeq ($(ENABLE_COVERAGE),1)
+  VERILATOR_COVERAGE_FLAGS := --coverage-line --coverage-toggle
+  CXXFLAGS += -DVM_COVERAGE=1
+else
+  VERILATOR_COVERAGE_FLAGS :=
+endif
 TRACE       ?= 0
 
 VERILATOR_G_FLAGS :=
@@ -88,6 +100,7 @@ verilate:
 		-Wno-fatal -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL \
 		-Wno-BLKSEQ -Wno-GENUNNAMED \
 		-DRISCV_FORMAL \
+		$(VERILATOR_COVERAGE_FLAGS) \
 		--cc $(RTL_FILE) \
 		--top-module $(MODULE) \
 		$(VERILATOR_G_FLAGS) \
@@ -109,15 +122,28 @@ $(MUT_SO):
 build: check dirs verilate $(MUT_SO)
 	@echo "$(BLUE)[BUILD] Compiling AFL harness...$(RESET)"
 	# Rebuild the Verilator model with AFL and LLVM tools
+	# Work around AFL++'s incompatibility with Verilator's PCH
+	# by pre-creating dummy PCH files to skip PCH compilation
+	@touch $(OBJ_DIR)/V$(MODULE)__pch.h.fast.gch
+	@touch $(OBJ_DIR)/V$(MODULE)__pch.h.slow.gch
+	@echo "// Empty PCH wrapper for AFL++ compatibility" > $(OBJ_DIR)/V$(MODULE)__pch.h.fast
+	@echo "// Empty PCH wrapper for AFL++ compatibility" > $(OBJ_DIR)/V$(MODULE)__pch.h.slow
 	$(MAKE) -C $(OBJ_DIR) -f V$(MODULE).mk V$(MODULE)__ALL.a \
 	    CC=afl-clang-fast++ CXX=afl-clang-fast++ \
-	    AR=llvm-ar RANLIB=llvm-ranlib
+	    AR=llvm-ar RANLIB=llvm-ranlib \
+	    OBJCACHE="" VM_PARALLEL_BUILDS=1
 
 	@if [ "$(TRACE)" = "1" ]; then \
 	  echo "$(BLUE)[LINK] VCD trace ENABLED (slow)$(RESET)"; \
 	  VCD_OBJ="/usr/share/verilator/include/verilated_vcd_c.cpp"; \
 	else \
 	  VCD_OBJ=""; \
+	fi; \
+	if [ "$(ENABLE_COVERAGE)" = "1" ]; then \
+	  echo "$(BLUE)[LINK] Verilator coverage ENABLED$(RESET)"; \
+	  COV_OBJ="/usr/share/verilator/include/verilated_cov.cpp"; \
+	else \
+	  COV_OBJ=""; \
 	fi; \
 	afl-clang-fast++ $(CXXFLAGS) -fuse-ld=lld \
 		-I$(OBJ_DIR) \
@@ -131,6 +157,7 @@ build: check dirs verilate $(MUT_SO)
 		/usr/share/verilator/include/verilated.cpp \
 		/usr/share/verilator/include/verilated_threads.cpp \
 		$$VCD_OBJ \
+		$$COV_OBJ \
 		-o $(FUZZ_EXE) \
 		$(LDFLAGS)
 	@echo "$(GREEN)[OK] Built harness binary: $(FUZZ_EXE)$(RESET)"

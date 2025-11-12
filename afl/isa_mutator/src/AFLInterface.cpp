@@ -7,8 +7,6 @@
 #include <string>
 #include <unistd.h>
 
-#include <hwfuzz/Log.hpp>
-
 #include <hwfuzz/Debug.hpp>
 #include <fuzz/mutator/ISAMutator.hpp>
 #include <fuzz/mutator/Random.hpp>

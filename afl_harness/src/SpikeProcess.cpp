@@ -2,12 +2,14 @@
 #include "SpikeExit.hpp"
 
 #include <cerrno>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <exception>
 #include <regex>
 #include <sstream>
+#include <thread>
 #include <vector>
 #include <sys/wait.h>
 
@@ -61,25 +63,28 @@ bool SpikeProcess::start(const std::string& spike_bin, const std::string& elf_pa
     spike_cmd_.append(quote_arg(arg));
   }
 
+  // Open log file before starting process if specified
+  if (!log_path_.empty()) {
+    log_file_ = std::fopen(log_path_.c_str(), "a");
+    if (log_file_) {
+      setvbuf(log_file_, nullptr, _IOLBF, 0);
+    }
+  }
+
   child_stream_ = std::make_unique<bp::ipstream>();
   try {
     child_.emplace(bp::exe = spike_bin,
                    bp::args = args,
                    bp::std_out > *child_stream_,
-                   bp::std_err > *child_stream_);
+                   bp::std_err > bp::null);  // Redirect stderr to null to avoid dup2 conflicts
   } catch (const std::exception &ex) {
     start_error_ = std::string("[ERROR] Failed to launch Spike: ") + ex.what();
     child_stream_.reset();
-    return false;
-  }
-  if (!log_path_.empty()) {
-    // Open in append mode so we never overwrite previous contents.
-    log_file_ = std::fopen(log_path_.c_str(), "a");
     if (log_file_) {
-      // Line-buffer the file so it shows up while running
-      setvbuf(log_file_, nullptr, _IOLBF, 0);
+      std::fclose(log_file_);
+      log_file_ = nullptr;
     }
-    // If fopen failed, continue without file gracefully
+    return false;
   }
   // prepare regexes
   commit_re_ = std::regex("core\\s+0:\\s+0x([0-9a-fA-F]+)\\s+\\(0x([0-9a-fA-F]+)\\)");
@@ -91,12 +96,23 @@ bool SpikeProcess::start(const std::string& spike_bin, const std::string& elf_pa
 void SpikeProcess::stop() {
   if (child_) {
     try {
-      child_->wait();
-      int exit_code = child_->exit_code();
-      last_status_ = exit_code << 8;
-      status_valid_ = true;
+      // Force terminate Spike process (don't wait indefinitely)
+      child_->terminate();
+      // Brief wait to collect status
+      std::this_thread::sleep_for(std::chrono::milliseconds(200));
+      // Try to get exit status (may fail if process was killed)
+      try {
+        child_->wait();
+        int exit_code = child_->exit_code();
+        last_status_ = exit_code << 8;
+        status_valid_ = true;
+      } catch (...) {
+        // If wait fails, assume terminated
+        last_status_ = 0;
+        status_valid_ = false;
+      }
     } catch (const std::exception &ex) {
-      start_error_ = std::string("[WARN] Failed to collect Spike status: ") + ex.what();
+      start_error_ = std::string("[WARN] Failed to stop Spike: ") + ex.what();
       status_valid_ = false;
     }
     child_.reset();

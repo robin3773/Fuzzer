@@ -31,6 +31,14 @@ namespace crash_detection {
  * @param cyc Current execution cycle number
  * @param input Fuzzer input that triggered the violation
  * @return true if violation detected and logged, false otherwise
+ * 
+ * Example:
+ * @code
+ *   if (crash_detection::check_x0_write(cpu, logger, cycle, input)) {
+ *     // Crash file already written; abort current test case.
+ *     return true;
+ *   }
+ * @endcode
  */
 bool check_x0_write(const CpuIface* cpu, const CrashLogger& logger, 
                     unsigned cyc, const std::vector<unsigned char>& input);
@@ -49,6 +57,15 @@ bool check_x0_write(const CpuIface* cpu, const CrashLogger& logger,
  * @param cyc Current execution cycle number
  * @param input Fuzzer input that triggered the violation
  * @return true if violation detected and logged, false otherwise
+ * 
+ * Example:
+ * @code
+ *   if (crash_detection::check_pc_misaligned(cpu, logger, cycle, input)) {
+ *     logger.writeCrash("pc_misaligned", cpu->rvfi_pc_rdata(),
+ *                       cpu->rvfi_insn(), cycle, input);
+ *     return true;
+ *   }
+ * @endcode
  */
 bool check_pc_misaligned(const CpuIface* cpu, const CrashLogger& logger,
                          unsigned cyc, const std::vector<unsigned char>& input);
@@ -70,6 +87,14 @@ bool check_pc_misaligned(const CpuIface* cpu, const CrashLogger& logger,
  * @param cyc Current execution cycle number
  * @param input Fuzzer input that triggered the violation
  * @return true if violation detected and logged, false otherwise
+ * 
+ * Example:
+ * @code
+ *   if (crash_detection::check_mem_align_load(cpu, logger, cycle, input)) {
+ *     // Misaligned load logged; stop executing this test case.
+ *     return true;
+ *   }
+ * @endcode
  */
 bool check_mem_align_load(const CpuIface* cpu, const CrashLogger& logger,
                           unsigned cyc, const std::vector<unsigned char>& input);
@@ -91,6 +116,14 @@ bool check_mem_align_load(const CpuIface* cpu, const CrashLogger& logger,
  * @param cyc Current execution cycle number
  * @param input Fuzzer input that triggered the violation
  * @return true if violation detected and logged, false otherwise
+ * 
+ * Example:
+ * @code
+ *   if (crash_detection::check_mem_align_store(cpu, logger, cycle, input)) {
+ *     // Crash artifacts saved describing the illegal store access.
+ *     return true;
+ *   }
+ * @endcode
  */
 bool check_mem_align_store(const CpuIface* cpu, const CrashLogger& logger,
                            unsigned cyc, const std::vector<unsigned char>& input);
@@ -107,6 +140,14 @@ bool check_mem_align_store(const CpuIface* cpu, const CrashLogger& logger,
  * @param logger Crash logger for recording timeout
  * @param input Fuzzer input that triggered the timeout
  * @return true if timeout detected and logged, false otherwise
+ * 
+ * Example:
+ * @code
+ *   if (crash_detection::check_timeout(cycle, cfg.max_cycles, cpu, logger, input)) {
+ *     // Timeout recorded; break out of the execution loop.
+ *     break;
+ *   }
+ * @endcode
  */
 bool check_timeout(unsigned cyc, unsigned max_cycles, const CpuIface* cpu,
                    const CrashLogger& logger, const std::vector<unsigned char>& input);
@@ -130,6 +171,18 @@ bool check_timeout(unsigned cyc, unsigned max_cycles, const CpuIface* cpu,
  * @param last_pc_valid Reference to validity flag for last_pc
  * @param stagnation_count Reference to consecutive count (maintains state)
  * @return true if stagnation detected and logged, false otherwise
+ * 
+ * Example:
+ * @code
+ *   static uint32_t last_pc = 0;
+ *   static bool last_valid = false;
+ *   static unsigned stagnation = 0;
+ *   if (crash_detection::check_pc_stagnation(cpu, logger, cycle, input,
+ *                                            cfg.pc_stagnation_limit,
+ *                                            last_pc, last_valid, stagnation)) {
+ *     return true; // Crash logged.
+ *   }
+ * @endcode
  */
 bool check_pc_stagnation(const CpuIface* cpu, const CrashLogger& logger,
                          unsigned cyc, const std::vector<unsigned char>& input,
@@ -147,6 +200,14 @@ bool check_pc_stagnation(const CpuIface* cpu, const CrashLogger& logger,
  * @param cyc Current execution cycle number
  * @param input Fuzzer input that triggered the trap
  * @return true if trap detected and logged, false otherwise
+ * 
+ * Example:
+ * @code
+ *   if (crash_detection::check_trap(cpu, logger, cycle, input)) {
+ *     // Trap condition logged; abort execution and report crash.
+ *     return true;
+ *   }
+ * @endcode
  */
 bool check_trap(const CpuIface* cpu, const CrashLogger& logger,
                 unsigned cyc, const std::vector<unsigned char>& input);

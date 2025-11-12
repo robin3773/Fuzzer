@@ -27,6 +27,9 @@ RAM_SIZE_ALIGNED = DEFINED(RAM_SIZE_ALIGNED) ? RAM_SIZE_ALIGNED : (RAM_SIZE_BYTE
 /* Stack top (default = end of RAM) */
 STACK_ADDR       = DEFINED(STACK_ADDR)       ? STACK_ADDR       : (RAM_BASE + RAM_SIZE_ALIGNED);
 
+/* Tohost address for Spike exit detection */
+TOHOST_ADDR      = DEFINED(TOHOST_ADDR)      ? TOHOST_ADDR      : 0x80001000;
+
 /*--------------------------------------------------------------------
   Define memory regions
 --------------------------------------------------------------------*/
@@ -34,6 +37,7 @@ MEMORY
 {
   ROM (rx)  : ORIGIN = ROM_BASE, LENGTH = ROM_SIZE
   RAM (rwx) : ORIGIN = RAM_BASE, LENGTH = RAM_SIZE_ALIGNED
+  TOHOST (rw) : ORIGIN = TOHOST_ADDR, LENGTH = 0x10
 }
 
 /*--------------------------------------------------------------------
@@ -99,6 +103,17 @@ SECTIONS
   /* Heap grows upward after .bss */
   __heap_start  = _ebss;
   __heap_end    = __stack_limit;
+
+  /*------------------------------------------------------------
+    Spike exit mechanism (tohost/fromhost)
+  ------------------------------------------------------------*/
+  .tohost TOHOST_ADDR (NOLOAD) :
+  {
+    tohost = .;
+    . += 8;
+    fromhost = .;
+    . += 8;
+  } >TOHOST
 }
 
 /*--------------------------------------------------------------------
@@ -116,3 +131,5 @@ PROVIDE(__stack_limit = __stack_limit);
 PROVIDE(__heap_start  = __heap_start);
 PROVIDE(__heap_end    = __heap_end);
 PROVIDE(__irq_entry   = PROGADDR_IRQ);
+PROVIDE(tohost        = tohost);
+PROVIDE(fromhost      = fromhost);

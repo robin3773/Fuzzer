@@ -1,7 +1,7 @@
 #include "GoldenModel.hpp"
 #include "SpikeHelpers.hpp"
+#include "HarnessConfig.hpp"
 #include <hwfuzz/Debug.hpp>
-#include <cstdlib>
 
 GoldenModel::GoldenModel() 
   : golden_ready_(false), trace_enabled_(false), golden_mode_("live") {
@@ -11,18 +11,14 @@ GoldenModel::~GoldenModel() {
   stop();
 }
 
-bool GoldenModel::initialize(const std::vector<unsigned char>& input, const char* trace_dir) {
-  // Read configuration from environment
-  const char* golden_mode_env = std::getenv("GOLDEN_MODE");
-  const char* spike_env = std::getenv("SPIKE_BIN");
-  const char* spike_isa_env = std::getenv("SPIKE_ISA");
-  const char* pk_env = std::getenv("PK_BIN");
-  const char* spike_log_env = std::getenv("SPIKE_LOG_FILE");
-  const char* trace_mode_env = std::getenv("TRACE_MODE");
-
-  if (golden_mode_env && *golden_mode_env) {
-    golden_mode_ = std::string(golden_mode_env);
+bool GoldenModel::initialize(const std::vector<unsigned char>& input, const HarnessConfig& cfg) {
+  // Read configuration from HarnessConfig
+  if (!cfg.golden_mode.empty()) {
+    golden_mode_ = cfg.golden_mode;
+  } else {
+    golden_mode_ = "live";
   }
+  spike_log_path_.clear();
 
   // Check if golden model should be disabled
   if (golden_mode_ == "off" || golden_mode_ == "none" || golden_mode_ == "0") {
@@ -41,22 +37,21 @@ bool GoldenModel::initialize(const std::vector<unsigned char>& input, const char
     golden_mode_ = "live";
   }
 
-  if (!spike_env || !*spike_env) {
-    hwfuzz::debug::logInfo("[GOLDEN] SPIKE_BIN not set; golden model disabled\n");
+  if (cfg.spike_bin.empty()) {
+    hwfuzz::debug::logInfo("[GOLDEN] SPIKE_BIN not set in harness.conf; golden model disabled\n");
     return false;
   }
 
-  std::string spike_bin(spike_env);
-  std::string spike_isa = spike_isa_env && *spike_isa_env ? std::string(spike_isa_env) : "rv32imc";
-  std::string pk_bin = pk_env && *pk_env ? std::string(pk_env) : "";
+  std::string spike_bin(cfg.spike_bin);
+  std::string spike_isa = cfg.spike_isa.empty() ? "rv32imc" : cfg.spike_isa;
+  std::string pk_bin = cfg.pk_bin;
 
   // Set log path
-  if (spike_log_env && *spike_log_env) {
-    spike_.set_log_path(spike_log_env);
-  }
+  spike_log_path_ = cfg.spike_log_file;
+  spike_.set_log_path(spike_log_path_);
 
   // Build temporary ELF from input
-  tmp_elf_ = spike_helpers::build_spike_elf(input);
+  tmp_elf_ = spike_helpers::build_spike_elf(input, cfg.ld_bin, cfg.linker_script);
   if (tmp_elf_.empty()) {
     hwfuzz::debug::logError("[GOLDEN] Failed to build Spike ELF; disabling golden model\n");
     return false;
@@ -64,11 +59,11 @@ bool GoldenModel::initialize(const std::vector<unsigned char>& input, const char
 
   // Start Spike process
   if (!spike_.start(spike_bin, tmp_elf_, spike_isa, pk_bin)) {
-    hwfuzz::debug::logError("[GOLDEN] Failed to start Spike.\n  Command: %s\n  ELF: %s\n", 
-                            spike_.command().c_str(), tmp_elf_.c_str());
-    if (spike_log_env && *spike_log_env) {
-      hwfuzz::debug::logError("[GOLDEN]   See Spike log: %s\n", spike_log_env);
-      spike_helpers::print_log_tail(spike_log_env, 60);
+    hwfuzz::debug::logError("[GOLDEN] Failed to start Spike.\n  Command: %s\n  ELF: %s\n  Error: %s\n", 
+                            spike_.command().c_str(), tmp_elf_.c_str(), spike_.last_error().c_str());
+    if (!spike_log_path_.empty()) {
+      hwfuzz::debug::logError("[GOLDEN]   See Spike log: %s\n", spike_log_path_.c_str());
+      spike_helpers::print_log_tail(spike_log_path_.c_str(), 60);
     }
     return false;
   }
@@ -77,14 +72,11 @@ bool GoldenModel::initialize(const std::vector<unsigned char>& input, const char
   hwfuzz::debug::logInfo("[GOLDEN] Spike golden model started successfully\n");
 
   // Setup golden trace if enabled
-  trace_enabled_ = true;
-  if (trace_mode_env && (std::string(trace_mode_env) == "off" || std::string(trace_mode_env) == "0")) {
-    trace_enabled_ = false;
-  }
+  trace_enabled_ = cfg.trace_enabled;
 
   if (trace_enabled_) {
-    hwfuzz::debug::logInfo("[GOLDEN] Opening golden trace in %s\n", trace_dir);
-    golden_tracer_.open_with_basename(trace_dir, "golden.trace");
+    hwfuzz::debug::logInfo("[GOLDEN] Opening golden trace in %s\n", cfg.trace_dir.c_str());
+    golden_tracer_.open_with_basename(cfg.trace_dir, "golden.trace");
   }
 
   return true;
@@ -115,10 +107,9 @@ bool GoldenModel::next_commit(CommitRec& rec) {
                            spike_.command().c_str(), tmp_elf_.c_str());
   }
 
-  const char* spike_log = std::getenv("SPIKE_LOG_FILE");
-  if (spike_log && *spike_log) {
-    hwfuzz::debug::logWarn("[GOLDEN]   See Spike log: %s\n", spike_log);
-    spike_helpers::print_log_tail(spike_log, 60);
+  if (!spike_log_path_.empty()) {
+    hwfuzz::debug::logWarn("[GOLDEN]   See Spike log: %s\n", spike_log_path_.c_str());
+    spike_helpers::print_log_tail(spike_log_path_.c_str(), 60);
   }
 
   return false;

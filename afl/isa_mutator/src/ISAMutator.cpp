@@ -40,7 +40,6 @@ void ISAMutator::initFromEnv() {
   }
   
   word_bytes_ = std::max<uint32_t>(1, isa_.base_width / 8);
-  hwfuzz::debug::logInfo("Loaded ISA '%s': %zu instructions\n", isa_.isa_name.c_str(), isa_.instructions.size());
 }
 
 unsigned char *ISAMutator::mutateStream(unsigned char *in, size_t in_len,
