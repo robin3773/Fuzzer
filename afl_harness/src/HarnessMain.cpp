@@ -13,12 +13,14 @@
 
 #include "verilated.h"
 #include <hwfuzz/Debug.hpp>
+#include <algorithm>
 #include <csignal>
 #include <vector>
 #include <string>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cctype>
 #include <fcntl.h>
 #include <unistd.h>
 
@@ -99,6 +101,7 @@ struct ExecutionState {
   uint32_t last_progress_pc;
   bool last_progress_valid;
   unsigned stagnation_count;
+  bool bootloader_skipped;
 };
 
 static void handle_signal_crash(CrashLogger& logger, CpuIface* cpu, unsigned cyc,
@@ -171,6 +174,8 @@ static void run_execution_loop(CpuIface* cpu, const HarnessConfig& cfg,
       rec.mem_addr = cpu->rvfi_mem_addr();
       rec.mem_rmask = cpu->rvfi_mem_rmask();
       rec.mem_wmask = cpu->rvfi_mem_wmask();
+      rec.mem_wdata = cpu->rvfi_mem_wdata();
+      rec.mem_rdata = cpu->rvfi_mem_rdata();
       rec.trap = cpu->trap() ? 1u : 0u;
       
       tracer.write(rec);
@@ -205,15 +210,37 @@ static void run_execution_loop(CpuIface* cpu, const HarnessConfig& cfg,
 
       // Golden model differential checking
       if (golden.is_ready()) {
-        CommitRec gold_rec;
-        if (golden.next_commit(gold_rec)) {
-          diff_checker.update_golden_state(gold_rec);
-          diff_checker.check_divergence(rec, gold_rec, logger, state.cyc, input);
-        } else if (cfg.stop_on_spike_done && golden.spike().has_status() &&
-                   golden.spike().exited() && golden.spike().exit_code() == 0) {
-          state.exit_reason = ExitReason::SpikeDone;
-          state.graceful_exit = true;
-          break;
+        // Skip Spike bootloader commits (PC < 0x80000000) before first comparison
+        if (!state.bootloader_skipped) {
+          CommitRec skip_rec;
+          while (golden.next_commit(skip_rec)) {
+            if (skip_rec.pc_w >= 0x80000000) {
+              // Reached DUT entry point - use this commit for comparison
+              diff_checker.update_golden_state(skip_rec);
+              diff_checker.check_divergence(rec, skip_rec, logger, state.cyc, input);
+              state.bootloader_skipped = true;
+              break;
+            }
+            // Discard bootloader commit, continue skipping
+          }
+          if (!state.bootloader_skipped) {
+            // Spike stopped before reaching entry point
+            state.exit_reason = ExitReason::SpikeDone;
+            state.graceful_exit = true;
+            break;
+          }
+        } else {
+          // Normal operation after bootloader skipped
+          CommitRec gold_rec;
+          if (golden.next_commit(gold_rec)) {
+            diff_checker.update_golden_state(gold_rec);
+            diff_checker.check_divergence(rec, gold_rec, logger, state.cyc, input);
+          } else if (cfg.stop_on_spike_done && golden.spike().has_status() &&
+                     golden.spike().exited() && golden.spike().exit_code() == 0) {
+            state.exit_reason = ExitReason::SpikeDone;
+            state.graceful_exit = true;
+            break;
+          }
         }
       }
     }
@@ -250,7 +277,7 @@ int main(int argc, char** argv) {
 
   // One-time initialization (outside AFL++ loop)
   CrashLogger logger(cfg);
-  TraceWriter tracer = setup_trace(cfg);
+  // Note: Trace file is NOT initialized here - it's per-test-case now
   
   // Setup feedback for AFL++ (shared across iterations)
   Feedback feedback;
@@ -261,27 +288,14 @@ int main(int argc, char** argv) {
   std::string coverage_file = cfg.trace_dir + "/coverage.dat";
   coverage.initialize(coverage_file);
 
-  // AFL++ persistent mode - fork server starts here
-  // This dramatically improves fuzzing speed by avoiding process startup overhead
-  __AFL_INIT();
-  
-  hwfuzz::debug::logInfo("[HARNESS] Starting AFL++ persistent mode loop\n");
-  
-  // Per-iteration fuzzing loop (AFL++ will restart from here)
-  while (__AFL_LOOP(10000)) {
-    hwfuzz::debug::logInfo("[HARNESS] Loop iteration started\n");
-    
-    // Load input for this iteration (must reopen file each time for AFL++ @@)
-    std::vector<unsigned char> input = load_input(argc, argv);
-    
-    hwfuzz::debug::logInfo("[HARNESS] Loaded %zu bytes of input\n", input.size());
-    
-    // Skip empty inputs
-    if (input.empty()) {
-      hwfuzz::debug::logWarn("[HARNESS] Empty input, skipping iteration\n");
-      continue;
+  auto execute_test_case = [&](const std::vector<unsigned char>& input) {
+    // Initialize per-test-case trace writer
+    // This ensures each test case gets a fresh trace file instead of accumulating
+    TraceWriter tracer;
+    if (cfg.trace_enabled) {
+      tracer.open(cfg.trace_dir);
     }
-
+    
     // Initialize DUT (fresh instance per iteration)
     CpuIface* cpu = make_cpu();
     cpu->reset();
@@ -303,8 +317,9 @@ int main(int argc, char** argv) {
 
     run_execution_loop(cpu, cfg, input, logger, tracer, golden, diff_checker, feedback, coverage, state);
 
-    // Write coverage data
+    // Write coverage data and report to AFL++
     coverage.write_and_reset();
+    coverage.report_to_afl(feedback);
 
     // Cleanup golden model
     golden.stop();
@@ -314,8 +329,7 @@ int main(int argc, char** argv) {
       hwfuzz::debug::logInfo("[HARNESS] Graceful termination after %u cycles (reason=%s).\n",
                              state.cyc, exit_reason_text(state.exit_reason));
       delete cpu;
-      // Continue to next iteration in persistent mode
-      continue;
+      return;
     }
 
     // Check for timeout (hang detection)
@@ -326,10 +340,53 @@ int main(int argc, char** argv) {
       std::abort();
     }
 
-    // Cleanup for next iteration
     delete cpu;
+  };
+
+  std::string golden_mode_lower = cfg.golden_mode;
+  std::transform(golden_mode_lower.begin(), golden_mode_lower.end(), golden_mode_lower.begin(),
+                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+  bool use_persistent = (golden_mode_lower != "live");
+
+  if (use_persistent) {
+    // AFL++ persistent mode - fork server starts here
+    // This dramatically improves fuzzing speed by avoiding process startup overhead
+    __AFL_INIT();
+
+    hwfuzz::debug::logInfo("[HARNESS] Starting AFL++ persistent mode loop\n");
+
+    // Per-iteration fuzzing loop (AFL++ will restart from here)
+    while (__AFL_LOOP(10000)) {
+      hwfuzz::debug::logInfo("[HARNESS] Loop iteration started\n");
+
+      // Load input for this iteration (must reopen file each time for AFL++ @@)
+      std::vector<unsigned char> input = load_input(argc, argv);
+
+      hwfuzz::debug::logInfo("[HARNESS] Loaded %zu bytes of input\n", input.size());
+
+      // Skip empty inputs
+      if (input.empty()) {
+        hwfuzz::debug::logWarn("[HARNESS] Empty input, skipping iteration\n");
+        continue;
+      }
+
+      execute_test_case(input);
+    }
+
+    // Exit after AFL++ persistent loop completes
+    _exit(0);
   }
 
-  // Exit after AFL++ persistent loop completes
-  _exit(0);
+  // GOLDEN_MODE=live → no persistent loop, just single-run model
+  __AFL_INIT();
+  hwfuzz::debug::logInfo("[HARNESS] Non-persistent execution (GOLDEN_MODE=live)\n");
+  hwfuzz::debug::logInfo("[HARNESS] Loop iteration started\n");
+  std::vector<unsigned char> input = load_input(argc, argv);
+  hwfuzz::debug::logInfo("[HARNESS] Loaded %zu bytes of input\n", input.size());
+  if (input.empty()) {
+    hwfuzz::debug::logWarn("[HARNESS] Empty input, exiting\n");
+    return 0;
+  }
+  execute_test_case(input);
+  return 0;
 }

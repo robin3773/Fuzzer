@@ -2,8 +2,12 @@
 
 #include "SpikeProcess.hpp"
 #include "Trace.hpp"
-#include <vector>
+#include <condition_variable>
+#include <deque>
+#include <mutex>
 #include <string>
+#include <thread>
+#include <vector>
 #include <cstdint>
 
 struct HarnessConfig;

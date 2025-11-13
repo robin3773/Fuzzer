@@ -13,9 +13,11 @@
 #include "HarnessConfig.hpp"
 #include "Utils.hpp"
 #include <cstdint>
+#include <deque>
 #include <exception>
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <string>
 #include <system_error>
@@ -210,6 +212,9 @@ public:
       }
     }
 
+    // Append execution traces if available
+    append_traces(log);
+
     writeTextAtomically(log_path, log);
   }
 
@@ -218,6 +223,74 @@ private:
    * @brief Harness configuration (crash directory, objdump path, etc.)
    */
   HarnessConfig cfg_;
+
+  /**
+   * @brief Append DUT and golden model traces to crash log
+   * 
+   * Reads trace files from the trace directory and appends their contents
+   * to the crash log. This provides instruction-level execution history
+   * to aid in debugging the crash.
+   * 
+   * @param log String to append trace content to
+   */
+  void append_traces(std::string &log) const {
+    const std::string dut_trace_path = cfg_.trace_dir + "/dut.trace";
+    const std::string golden_trace_path = cfg_.trace_dir + "/golden.trace";
+
+    // Append DUT trace
+    std::string dut_trace = read_trace_tail(dut_trace_path, 100);
+    if (!dut_trace.empty()) {
+      log += "\n";
+      log += "=== DUT Execution Trace (last 100 instructions) ===\n";
+      log += dut_trace;
+    }
+
+    // Append golden model trace if it exists
+    std::string golden_trace = read_trace_tail(golden_trace_path, 100);
+    if (!golden_trace.empty()) {
+      log += "\n";
+      log += "=== Golden Model Trace (last 100 instructions) ===\n";
+      log += golden_trace;
+    }
+  }
+
+  /**
+   * @brief Read last N lines from a trace file
+   * 
+   * @param path Path to trace file
+   * @param max_lines Maximum number of lines to read from the end
+   * @return Trace content (empty if file doesn't exist or is empty)
+   */
+  static std::string read_trace_tail(const std::string &path, size_t max_lines) {
+    std::ifstream file(path);
+    if (!file.is_open()) {
+      return "";
+    }
+
+    std::deque<std::string> lines;
+    std::string line;
+    
+    // Read all lines, keeping only the last max_lines
+    while (std::getline(file, line)) {
+      lines.push_back(line);
+      if (lines.size() > max_lines + 1) {  // +1 for header
+        lines.pop_front();
+      }
+    }
+
+    if (lines.empty()) {
+      return "";
+    }
+
+    // Reconstruct the tail
+    std::string result;
+    for (const auto &l : lines) {
+      result += l;
+      result += "\n";
+    }
+    
+    return result;
+  }
 
   /**
    * @brief Convert uint32_t to zero-padded 8-digit hex string

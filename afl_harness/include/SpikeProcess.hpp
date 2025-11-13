@@ -581,4 +581,14 @@ private:
    * @brief Monotonic instruction counter for log headers
    */
   size_t instr_index_ = 0;
+  
+  /**
+   * @brief Last observed PC from Spike (for tracking pc_r/pc_w in RVFI format)
+   */
+  uint32_t last_pc_ = 0;
+  
+  /**
+   * @brief Flag indicating if we've seen the first commit (to initialize last_pc_)
+   */
+  bool first_commit_seen_ = false;
 };

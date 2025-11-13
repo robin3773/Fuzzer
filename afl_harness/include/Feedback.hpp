@@ -63,6 +63,18 @@ public:
   void report_register_write(uint32_t reg_num, uint32_t value);
 
   /**
+   * @brief Report Verilator structural coverage to AFL++
+   * 
+   * Feeds RTL-level coverage metrics (line, toggle, FSM) into AFL++'s
+   * coverage bitmap for hardware-guided fuzzing.
+   * 
+   * @param lines Number of RTL lines executed
+   * @param toggles Number of signal toggles
+   * @param fsm_states Number of FSM states visited
+   */
+  void report_verilator_coverage(uint32_t lines, uint32_t toggles, uint32_t fsm_states);
+
+  /**
    * @brief Check if feedback is enabled
    * 
    * @return True if connected to AFL++ shared memory

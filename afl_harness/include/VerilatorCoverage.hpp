@@ -18,6 +18,9 @@
 #include <string>
 #include <memory>
 
+// Forward declaration - Feedback is in global namespace
+class Feedback;
+
 namespace fuzz {
 
 /**
@@ -48,8 +51,10 @@ public:
    * - New signal toggles
    * - New FSM states reached
    * - New trace events captured
+   * 
+   * @param feedback Reference to Feedback object for AFL++ integration
    */
-  void report_to_afl();
+  void report_to_afl(Feedback& feedback);
 
   /**
    * @brief Write coverage data to file and reset for next iteration

@@ -85,6 +85,7 @@ bool GoldenModel::initialize(const std::vector<unsigned char>& input, const Harn
 bool GoldenModel::next_commit(CommitRec& rec) {
   if (!golden_ready_) return false;
 
+  // Synchronous read from Spike
   if (spike_.next_commit(rec)) {
     write_trace(rec);
     return true;

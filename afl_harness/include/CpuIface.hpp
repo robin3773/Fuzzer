@@ -334,6 +334,41 @@ public:
    */
   virtual uint32_t rvfi_mem_wmask() const = 0;
   
+  /**
+   * @brief Get memory write data for committed instruction
+   * 
+   * Returns the data value that was written to memory. Only valid when
+   * rvfi_mem_wmask() is non-zero.
+   * 
+   * @return Data written to memory (undefined if no write occurred)
+   * 
+   * Example:
+   * @code
+   *   if (cpu->rvfi_mem_wmask()) {
+   *     uint32_t data = cpu->rvfi_mem_wdata();
+   *     uint32_t addr = cpu->rvfi_mem_addr();
+   *   }
+   * @endcode
+   */
+  virtual uint32_t rvfi_mem_wdata() const = 0;
+
+  /**
+   * @brief Get memory read data for committed instruction
+   * 
+   * Returns the data value that was read from memory. Only valid when
+   * rvfi_mem_rmask() is non-zero.
+   * 
+   * @return Data read from memory (undefined if no read occurred)
+   * 
+   * Example:
+   * @code
+   *   if (cpu->rvfi_mem_rmask()) {
+   *     uint32_t data = cpu->rvfi_mem_rdata();
+   *   }
+   * @endcode
+   */
+  virtual uint32_t rvfi_mem_rdata() const = 0;
+  
   // ========================================================================
   // Optional RVFI CSR (Control and Status Register) Tracking
   // ========================================================================

@@ -26,6 +26,11 @@ public:
   DifferentialChecker();
 
   /**
+   * @brief Destructor to clean up shadow memory
+   */
+  ~DifferentialChecker();
+
+  /**
    * @brief Reset shadow state (register file + CSRs) to zeros
    * 
    * Clears all mirrored architectural state to prepare for a new test
@@ -129,6 +134,13 @@ private:
   uint64_t gold_mcycle_;
   uint64_t dut_minstret_;
   uint64_t gold_minstret_;
+
+  // Shadow memory for store/load tracking (256KB RAM + 256KB ROM = 512KB total)
+  // We track the full address space to catch any store bugs
+  static constexpr size_t MEM_SIZE = 512 * 1024;  // 512KB
+  static constexpr uint32_t MEM_BASE = 0x80000000;
+  uint8_t* dut_mem_;
+  uint8_t* gold_mem_;
 
   /**
    * @brief Detect PC mismatches between DUT and golden commits

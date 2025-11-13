@@ -50,10 +50,10 @@ CXXFLAGS    ?= -std=c++17 -O2 -g -fno-omit-frame-pointer
 LDFLAGS     ?= -lpthread -latomic -ldl -lboost_system -Wl,--allow-multiple-definition
 
 # Coverage options (set ENABLE_COVERAGE=0 to disable Verilator coverage)
-# Temporarily disabled due to API incompatibility - will be fixed in a future update
-ENABLE_COVERAGE ?= 0
+# Enabled by default for hardware-specific feedback
+ENABLE_COVERAGE ?= 1
 ifeq ($(ENABLE_COVERAGE),1)
-  VERILATOR_COVERAGE_FLAGS := --coverage-line --coverage-toggle
+  VERILATOR_COVERAGE_FLAGS := --coverage --coverage-line --coverage-toggle
   CXXFLAGS += -DVM_COVERAGE=1
 else
   VERILATOR_COVERAGE_FLAGS :=

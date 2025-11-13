@@ -37,7 +37,9 @@ bool SpikeProcess::start(const std::string& spike_bin, const std::string& elf_pa
   instr_index_ = 0;
   fatal_trap_seen_ = false;
   fatal_trap_summary_.clear();
-  std::vector<std::string> args{"-l", "--isa=" + isa};
+  first_commit_seen_ = false;  // Reset for new process
+  last_pc_ = 0;
+  std::vector<std::string> args{"-l", "--log-commits", "--isa=" + isa, "--pc=0x80000000"};  // Force Spike to start at DUT entry point
   if (!pk_bin.empty()) args.push_back(pk_bin);
   args.push_back(elf_path);
 
@@ -75,8 +77,7 @@ bool SpikeProcess::start(const std::string& spike_bin, const std::string& elf_pa
   try {
     child_.emplace(bp::exe = spike_bin,
                    bp::args = args,
-                   bp::std_out > *child_stream_,
-                   bp::std_err > bp::null);  // Redirect stderr to null to avoid dup2 conflicts
+                   (bp::std_out & bp::std_err) > *child_stream_);  // Merge stderr into stdout
   } catch (const std::exception &ex) {
     start_error_ = std::string("[ERROR] Failed to launch Spike: ") + ex.what();
     child_stream_.reset();
@@ -89,7 +90,8 @@ bool SpikeProcess::start(const std::string& spike_bin, const std::string& elf_pa
   // prepare regexes
   commit_re_ = std::regex("core\\s+0:\\s+0x([0-9a-fA-F]+)\\s+\\(0x([0-9a-fA-F]+)\\)");
   reg_write_re_ = std::regex("\\b(W|W0|W1)\"?\\s*x([0-9]+)\\s*[:<=-]+\\s*0x([0-9a-fA-F]+)");
-  simple_reg_re_ = std::regex("\\bx([0-9]+)\\)\\s*:=\\s*0x([0-9a-fA-F]+)");
+  // Updated to match --log-commits format: "x1  0x00018000" (two spaces)
+  simple_reg_re_ = std::regex("\\bx([0-9]+)\\s+0x([0-9a-fA-F]+)");
   return true;
 }
 
@@ -178,9 +180,29 @@ bool SpikeProcess::next_commit(CommitRec& rec) {
         chunk.push_back(hdr.str());
       }
       chunk.push_back(s);
-      // parse pc and insn
-      rec.pc_w = (uint32_t)std::stoul(m[1].str(), nullptr, 16);
+      // Parse PC and instruction from Spike output
+      // Spike outputs the PC of the instruction being executed (pc_r in RVFI terms)
+      uint32_t current_pc = (uint32_t)std::stoul(m[1].str(), nullptr, 16);
       rec.insn = (uint32_t)std::stoul(m[2].str(), nullptr, 16);
+      
+      // Set pc_r to the current PC (where the instruction is)
+      rec.pc_r = current_pc;
+      
+      // Set pc_w to the next sequential PC (will be overridden by next commit if branch/jump)
+      // For now, assume all instructions are 4 bytes (RV32)
+      rec.pc_w = current_pc + 4;
+      
+      // If we have a previous commit, update its pc_w to point to this commit's pc_r
+      // (This handles branches/jumps where pc_w != pc_r + 4)
+      if (first_commit_seen_ && last_pc_ != 0) {
+        // The previous instruction's pc_w should be this instruction's pc_r
+        // But we already returned the previous record, so we can't update it
+        // This is a limitation - we'll use sequential PC for non-branches
+      }
+      
+      last_pc_ = current_pc;
+      first_commit_seen_ = true;
+      
       // reset other fields; subsequent lines may contain register/mem writes
       rec.rd_addr = 0; rec.rd_wdata = 0; rec.mem_addr = 0; rec.mem_rmask = 0; rec.mem_wmask = 0; rec.trap = 0;
       rec.mem_is_load = rec.mem_is_store = 0; rec.mem_wdata = rec.mem_rdata = 0;
